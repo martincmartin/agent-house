@@ -6,7 +6,10 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
 
 - `user/AGENTS.md`: the user-level instructions
 - `user/skills/`: one directory for each skill, with its `SKILL.md`
-- `user/agents/`: one file for each subagent, in Claude Code's format
+- `user/agents/`: one file for each subagent, in Claude Code's format. A code
+  review is a skill (`review-general`, then `review-simplify`), not a
+  subagent: this is not an oversight
+  (`tasks/2026-10-21-review-without-subagent/`)
 - `install`: links `user/` to where each harness reads it, and converts the
   subagents
 - `tools/`: `convert-agent.py` (used by `install`) and `test-install`

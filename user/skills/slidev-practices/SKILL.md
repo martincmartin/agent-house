@@ -1,21 +1,27 @@
 ---
-name: slidev
+name: slidev-practices
 description: >
-  Slidev traps that fail silently, and how to check for them. Read before you
-  edit slides.md or pages/*.md, a layout, global-top.vue or global-bottom.vue,
-  a Slidev addon or theme, or the headmatter, and before you export, print or
-  build a deck. Covers: offline and private-window browsers, fonts, one
-  exported page per click, v-click classes, going back a click or a slide,
-  slide classes and .slidev-layout, CSS-transform scaling, speaker notes,
-  routes, Slidev internals, Prettier and pnpm.
+  Practices for every Slidev deck; for now, the traps that fail silently, and
+  how to check for them. Read before you plan, write or review a deck: before
+  you edit slides.md or pages/*.md, a layout, global-top.vue or
+  global-bottom.vue, a Slidev addon or theme, or the headmatter, and before you
+  export, print or build a deck. Covers: offline and private-window browsers,
+  fonts, one exported page per click, v-click classes, going back a click or a
+  slide, slide classes and .slidev-layout, CSS-transform scaling, speaker
+  notes, routes, Slidev internals, Prettier and pnpm.
 ---
 
-# Slidev traps that fail silently
+# Slidev practices
+
+Practices for every Slidev project, when you plan, write or review a deck. A
+project's own docs can add house rules on top of these.
+
+## Traps that fail silently
 
 Each item here is a way that a Slidev deck breaks with no error message, and
-what to do about it. A project's own docs can add house rules on top of these.
+what to do about it.
 
-## Offline, in every browser
+### Offline, in every browser
 
 A deck must run on any recent macOS or Windows laptop with no network. To
 check, build it and load it with every outside request blocked: it must make
@@ -32,7 +38,7 @@ privacy-sensitive API, also test Safari itself, in regular and private windows,
 when it is available. Say which tests ran and which could not. Do not turn off
 a privacy protection to make the deck work.
 
-## Fonts
+### Fonts
 
 These 14 font families are on both Windows and macOS, also in Firefox's
 private browsing with strict tracking protection: Arial, Arial Black, Comic Sans
@@ -48,7 +54,7 @@ before you add it; it then probably goes in `public/fonts/`.
 - **Import every weight that you use.** A missing weight fails silently: the
   browser uses the nearest weight, or fakes a bold.
 
-## Export and print: one page for each click
+### Export and print: one page for each click
 
 A click and a slide are the same to the audience, so an export has one page
 for each click: `slidev export --with-clicks`. Without it, Slidev prints each
@@ -72,7 +78,7 @@ slide at the same click. A still that is right at click 0 and wrong at clicks 1
 and up is the usual mistake, and a check of the live slide alone does not find
 it.
 
-## Clicks, slides and going back
+### Clicks, slides and going back
 
 - **The settled screen depends only on the slide and the click,** not on how
   the viewer got there: forward, back, a jump or a reload. Only the phase of
@@ -100,7 +106,7 @@ it.
   changes, Vue rewrites the element's classes and removes the `v-click` ones,
   with no error.
 
-## Slide classes and styles
+### Slide classes and styles
 
 - **A slide's `class:` goes on its `.slidev-layout` element.** A rule with the
   selector `.slidev-layout.<class>` changes those slides only.
@@ -115,20 +121,20 @@ it.
 - **Slidev merges each addon's `index.html` into the page,** so an addon can put
   a class on `<html>` with no JavaScript.
 
-## Scaling
+### Scaling
 
 Slidev draws a fixed canvas (980 CSS px wide by default, `canvasWidth`) and
 scales it to the window with a CSS transform. `clientWidth` and `offsetWidth`
 give the unscaled size. To size a canvas or a drawing to what is on the screen,
 use `getBoundingClientRect()`.
 
-## Speaker notes
+### Speaker notes
 
 Slidev takes only a slide's last HTML comment as its speaker note. Earlier
 comments show neither in the presenter view nor on the slide. So a comment
 that is not a note must come before the note.
 
-## Routes
+### Routes
 
 Slidev's `go()` always makes a play, presenter or export path. A page at a
 route of its own for a mode of the slides (for example `/narrated/3`) goes back
@@ -136,14 +142,14 @@ to `/4` at the first key press. For a mode of the slides, use a query flag
 (`?narration`): `go()` keeps it. A page that is not a slide can have its own
 route.
 
-## Slidev internals
+### Slidev internals
 
 `PrintSlideClick`, `useFixedNav`, `createFixedClicks`, `slideWidth`,
 `slideHeight` and `configs` are not a public API, and they change between
 releases. Code that uses them: pin the deck's Slidev version, and look at what
 uses them after each upgrade.
 
-## Prettier
+### Prettier
 
 Send every deck file to `prettier-plugin-slidev` (an override with
 `parser: "slidev"`): `slides.md`, and each file that it imports. Prettier's own
@@ -151,7 +157,7 @@ Markdown parser reads a slide's frontmatter as a thematic break and a
 paragraph. It adds a blank line after the `---` and removes the indentation from
 nested YAML keys, which breaks the slide with no error.
 
-## pnpm
+### pnpm
 
 A deck in a subdirectory of a pnpm workspace needs its own
 `pnpm-workspace.yaml`, unless it is a member of that workspace. Without one,

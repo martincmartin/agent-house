@@ -91,7 +91,8 @@ is expected.
 - All else being equal, prefer the simplest tool for the job. For example,
   render text with HTML, not SVG. Do not let a check's current limits decide
   the tool: if a check blocks a good design, change the check.
-- Before you write or change Python, read the `python-programming` skill.
+- Before you plan, write or review code in a subject that has a skill, read that
+  skill: `python-practices` for Python, `slidev-practices` for a Slidev deck.
 - Identify the repository's canonical validation command. Prefer it over
   inventing a new validation workflow. Run it to validate types, formatting,
   etc.
@@ -110,11 +111,14 @@ is expected.
   your branch, rebase it on `main`, and fast-forward `main` to it. Push only
   when the user asks.
 
-## Code-quality reviews
+## Reviews
 
-When the user asks for a code-quality review, read the `quality-review` skill.
+When the user asks for a code review, read the `review-general` skill. For a
+simplicity review (over-engineering, duplication), read `review-simplify` too.
 
 ## Code design
+
+These rules hold for all code, when you plan it, write it and review it.
 
 - Use descriptive names. Do not use one-letter names, except `x`, `y`, and `z`
   for coordinates. For example, use `index`, not `i`. Use ALL_CAPS only for
@@ -129,6 +133,11 @@ When the user asks for a code-quality review, read the `quality-review` skill.
   pre-check, for example), make one function and call it from both. Keep a
   link between objects as a field on the object (for example, `driven` and
   `driver`), not in a separate list of pairs.
+- When cases differ only in data, write one general component or function,
+  and give each case its data declaratively (in a slide's frontmatter, a table
+  or a config file), not a special component for each case. The mechanism is
+  then in one place. Cases that differ in behaviour can need code of their
+  own.
 - Keep an object's fixed data on the object. Keep the data that one run of an
   algorithm computes (positions, scores, visited flags) in a side table: a dict
   keyed by the object, made new for each run. Do not add fields for an

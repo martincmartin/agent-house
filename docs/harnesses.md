@@ -82,10 +82,10 @@ with that name that it did not write, or whose source is gone, and leaves it.
   shell permission `bash`, and its `edit` covers editing and writing files
   (checked with `opencode debug agent`, 2026-10-21).
 - **The limits block tools, not actions,** in every harness. A subagent that
-  keeps its shell (`review-quality-slidev` keeps `Bash`, to read and run
-  checks) can still write files and use the network through it. So "do not
-  write files" is an instruction there, not a guarantee. For a hard limit, use
-  the sandbox of the session that starts the subagent.
+  keeps its shell (a reviewer keeps it, to read and run checks) can still
+  write files and use the network through it. So "do not write files" is an
+  instruction there, not a guarantee. For a hard limit, use the sandbox of the
+  session that starts the subagent.
 
 ## Claude Code
 

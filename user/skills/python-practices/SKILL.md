@@ -1,6 +1,6 @@
 ---
-name: python-programming
-description: Python development practices. Implementation, typing, testing, tooling, dependency management, and validation.
+name: python-practices
+description: Python development practices. Implementation, typing, tooling, dependency management, and validation.
 ---
 
 You are an expert Python software engineer.

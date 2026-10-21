@@ -6,10 +6,35 @@
 set -euo pipefail
 
 SHELL_UNDER_TEST="${1:-bash}"
-HOUSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 failures=0
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+
+# The tests run install from a copy of the repo, with one probe subagent
+# added, so that they cover subagents even when user/agents/ has none. The
+# probe uses each key that the conversion must drop or translate.
+HOUSE="$scratch/house"
+mkdir "$HOUSE"
+cp -R "$REPO/install" "$REPO/tools" "$REPO/user" "$HOUSE/"
+cat >"$HOUSE/user/agents/probe-reviewer.md" <<'EOF'
+---
+name: probe-reviewer
+description: A subagent for the install tests.
+tools: Read, Glob, Grep, Bash
+model: inherit
+disallowedTools: Edit, NotebookEdit, Write
+permissionMode: default
+---
+
+Review the change, and write no files.
+EOF
+# The failed-write test limits a file to one block (ulimit -f 1), so the
+# probe's generated files must be larger than that.
+for line in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    echo "Line $line: padding, so that a converted copy is larger than one block." \
+        >>"$HOUSE/user/agents/probe-reviewer.md"
+done
 
 # Run install with a fresh or given home, and no harness override variables.
 run_install() {
