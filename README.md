@@ -4,15 +4,17 @@ The instructions, skills and subagents that apply to all my work, for every
 coding agent: Claude Code (CLI, VS Code and cloud sessions), Codex, OpenCode and
 Pi. Project-specific rules stay in each project's own `AGENTS.md`.
 
-| Path             | Holds                                                                              |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `user/AGENTS.md` | the user-level instructions                                                        |
-| `user/skills/`   | one directory for each skill, with its `SKILL.md`                                  |
-| `user/agents/`   | one file for each subagent, in Claude Code's format                                |
-| `install`        | links `user/` to where each harness reads it, and converts the subagents           |
-| `tools/`         | `convert-agent.py` (used by `install`) and `test-install`                          |
-| `docs/`          | [`harnesses.md`](docs/harnesses.md): where each harness reads what, and why        |
-| `AGENTS.md`      | the rules for working on this repo. No harness gets it as user-level instructions. |
+- `user/AGENTS.md`: the user-level instructions
+- `user/skills/`: one directory for each skill, with its `SKILL.md`
+- `user/agents/`: one file for each subagent, in Claude Code's format
+- `install`: links `user/` to where each harness reads it, and converts the
+  subagents
+- `tools/`: `convert-agent.py` (used by `install`) and `test-install`
+- `docs/` ([`harnesses.md`](docs/harnesses.md)): where each harness reads
+  what, and why
+- `tasks/`: one directory for each decision: its options, evidence and inputs
+- `AGENTS.md`: the rules for working on this repo. No harness gets it as
+  user-level instructions.
 
 ## Install
 

@@ -6,10 +6,11 @@ where each coding agent reads them (`README.md`).
 
 ## Read before you act
 
-| Before you…                                                                                     | Read                |
-| ----------------------------------------------------------------------------------------------- | ------------------- |
-| change `install` or `tools/convert-agent.py`, add a harness, move a link, or add a subagent key | `docs/harnesses.md` |
-| add, rename or remove a doc                                                                     | `docs/README.md`    |
+Before you…
+
+- change `install` or `tools/convert-agent.py`, add a harness, move a link, or
+  add a subagent key: `docs/harnesses.md`
+- add, rename or remove a doc: `docs/README.md`
 
 ## Rules
 

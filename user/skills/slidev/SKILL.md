@@ -63,8 +63,9 @@ slide once, at its last click.
 - **A page of one slide** (`/N?print=clicks`, which `slidev export --format png`
   opens) mounts every slide but shows only its own. A component that draws for
   each slide must draw only for the slide of its page.
-- **A built deck has no `/print` route.** To look at printed pages in a build,
-  open `/N?print=clicks`.
+- **A built deck has a `/print` route only if its headmatter sets `download`**
+  (to `true` or `auto`). To look at printed pages in any build, open
+  `/N?print=clicks`: the client reads `print` from the query.
 
 To check, run `slidev export --with-clicks`: each page must match the live
 slide at the same click. A still that is right at click 0 and wrong at clicks 1
@@ -81,9 +82,11 @@ it.
   from what is on the screen now to the new target. A move back is then the
   move forward reversed, with no code of its own. Do not write code that asks
   which way the viewer went (`navDirection`, `clicksDirection`).
-- **A visual on more than one slide is one element.** Slidev mounts a slide
-  before it shows it, so one copy on each slide starts each change from its own
-  last state, not from what was on the screen. Put the visual in a layer that
+- **A visual that changes from one slide to the next is one element**: it
+  moves, animates or changes state. Slidev mounts a slide before it shows it,
+  so one copy on each slide starts each change from its own last state, not
+  from what was on the screen. A visual that does not change (a logo, a static
+  diagram) can be a copy on each slide. Put the visual in a layer that
   stays mounted for the whole deck (`global-bottom.vue` or `global-top.vue`),
   and let it take its target from each slide.
 - **A step animates; a jump does not.** A step is one click, or the next or the
