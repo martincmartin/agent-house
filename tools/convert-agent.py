@@ -13,24 +13,41 @@ from __future__ import annotations
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-# OpenCode's permission keys, and the Claude Code tools that each one covers.
-# Checked with `opencode debug agent` (OpenCode 1.19.3).
-OPENCODE_PERMISSIONS: dict[str, tuple[str, ...]] = {
-    "read": ("Read",),
-    "glob": ("Glob",),
-    "grep": ("Grep",),
-    "edit": ("Edit", "MultiEdit", "NotebookEdit", "Write"),
-    "bash": ("Bash",),
-    "webfetch": ("WebFetch",),
-    "websearch": ("WebSearch",),
-    "task": ("Agent", "Task"),
-    "todowrite": ("TodoWrite",),
-    "skill": ("Skill",),
-}
-OPENCODE_TOOLS = frozenset(
-    tool for tools in OPENCODE_PERMISSIONS.values() for tool in tools
+
+@dataclass(frozen=True)
+class Capability:
+    """Something a subagent can be kept from doing.
+
+    claude_tools are the Claude Code tools that do it, opencode_permission is
+    OpenCode's permission key for it, and action says it in an instruction,
+    for Codex, which has no per-agent permissions.
+    """
+
+    claude_tools: tuple[str, ...]
+    opencode_permission: str
+    action: str
+
+
+# OpenCode's keys were checked with `opencode debug agent` (OpenCode 1.19.3).
+CAPABILITIES = (
+    Capability(("Read",), "read", "read files"),
+    Capability(("Glob",), "glob", "find files by name"),
+    Capability(("Grep",), "grep", "search file contents"),
+    Capability(
+        ("Edit", "MultiEdit", "NotebookEdit", "Write"), "edit", "edit or write files"
+    ),
+    Capability(("Bash",), "bash", "run shell commands"),
+    Capability(("WebFetch",), "webfetch", "fetch web pages"),
+    Capability(("WebSearch",), "websearch", "search the web"),
+    Capability(("Agent", "Task"), "task", "start subagents"),
+    Capability(("TodoWrite",), "todowrite", "use the todo list"),
+    Capability(("Skill",), "skill", "use skills"),
+)
+KNOWN_TOOLS = frozenset(
+    tool for capability in CAPABILITIES for tool in capability.claude_tools
 )
 
 
@@ -63,24 +80,24 @@ def tool_list(fields: dict[str, str], key: str) -> set[str] | None:
     if key not in fields:
         return None
     tools = {tool.strip() for tool in fields[key].split(",") if tool.strip()}
-    unknown = tools - OPENCODE_TOOLS
+    unknown = tools - KNOWN_TOOLS
     if unknown:
         raise ConversionError(
-            f"{key}: no OpenCode permission for {', '.join(sorted(unknown))};"
-            " add it to OPENCODE_PERMISSIONS in tools/convert-agent.py"
+            f"{key}: unknown tool {', '.join(sorted(unknown))};"
+            " add it to CAPABILITIES in tools/convert-agent.py"
         )
     return tools
 
 
-def opencode_denied(fields: dict[str, str]) -> list[str]:
-    """The OpenCode permissions to deny, from Claude Code's tools and disallowedTools."""
+def denied_capabilities(fields: dict[str, str]) -> list[Capability]:
+    """What the subagent may not do, from Claude Code's tools and disallowedTools."""
     allowed = tool_list(fields, "tools")
     disallowed = tool_list(fields, "disallowedTools") or set()
     denied = []
-    for permission, tools in OPENCODE_PERMISSIONS.items():
-        covered = set(tools)
+    for capability in CAPABILITIES:
+        covered = set(capability.claude_tools)
         if (allowed is not None and not covered & allowed) or covered & disallowed:
-            denied.append(permission)
+            denied.append(capability)
     return denied
 
 
@@ -96,6 +113,16 @@ def toml_string(value: str) -> str:
 
 
 def codex(fields: dict[str, str], body: str, header: str) -> str:
+    """Codex has no per-agent permissions: a custom agent runs in the sandbox of
+    the session that starts it. So the limits become an instruction.
+    """
+    denied = denied_capabilities(fields)
+    if denied:
+        actions = [capability.action for capability in denied]
+        listed = (
+            ", ".join(actions[:-1]) + (" or " if len(actions) > 1 else "") + actions[-1]
+        )
+        body += f"\n\nDo not {listed}."
     return "\n".join(
         [
             header,
@@ -118,10 +145,12 @@ def opencode(fields: dict[str, str], body: str, header: str) -> str:
         f"description: {json.dumps(fields['description'])}",
         "mode: subagent",
     ]
-    denied = opencode_denied(fields)
+    denied = denied_capabilities(fields)
     if denied:
         lines.append("permission:")
-        lines.extend(f"  {permission}: deny" for permission in denied)
+        lines.extend(
+            f"  {capability.opencode_permission}: deny" for capability in denied
+        )
     lines.extend(["---", "", body])
     return "\n".join(lines)
 

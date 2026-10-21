@@ -59,7 +59,18 @@ subagents. `install` links them for Claude Code and Pi, and
 first two lines of a generated file names its source. `install` reports a file
 with that name that it did not write, or whose source is gone, and leaves it.
 
-- **Codex** reads TOML: `name`, `description`, `developer_instructions`.
+- **The limits** come from Claude Code's `tools` (an allowlist) and
+  `disallowedTools`. `CAPABILITIES` in `tools/convert-agent.py` lists each
+  thing that a subagent can be kept from doing, with its Claude Code tools and
+  its OpenCode permission. A tool that the list does not know is an error: add
+  it to the list.
+- **Codex** reads TOML: `name`, `description`, `developer_instructions`. It has
+  no per-agent permissions. A custom agent runs in the sandbox of the session
+  that starts it, and its `sandbox_mode` does not override that
+  ([subagents docs](https://learn.chatgpt.com/docs/agent-configuration/subagents),
+  2026-10-21). So the limits become the last sentence of
+  `developer_instructions` ("Do not edit or write files, …"). Nothing enforces
+  it.
 - **OpenCode** gives `tools:` and `model:` other meanings: `tools` is a map of
   tool to `true` or `false` (and deprecated for `permission:`), and `model` is
   `provider/model-id`. It passes keys that it does not know to the model
@@ -67,12 +78,9 @@ with that name that it did not write, or whose source is gone, and leaves it.
   ([agents docs](https://opencode.ai/docs/agents/)). So the OpenCode copy has
   only `description`, `mode: subagent` and `permission:`. `model` is left out:
   then the subagent uses the model of the agent that calls it.
-- **`permission:`** comes from Claude Code's `tools` (an allowlist) and
-  `disallowedTools`. `OPENCODE_PERMISSIONS` in `tools/convert-agent.py` maps
-  each OpenCode permission to Claude Code tools. This OpenCode calls its shell
-  permission `bash`, and its `edit` covers editing and writing files (checked
-  with `opencode debug agent`, 2026-10-21). A tool that the map does not know
-  is an error: add it to the map.
+- **OpenCode's `permission:`** enforces the limits. This OpenCode calls its
+  shell permission `bash`, and its `edit` covers editing and writing files
+  (checked with `opencode debug agent`, 2026-10-21).
 
 ## Claude Code
 
