@@ -12,7 +12,8 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
   (`tasks/2026-10-21-review-without-subagent/`)
 - `install`: links `user/` to where each harness reads it, and converts the
   subagents
-- `tools/`: `convert-agent.py` (used by `install`) and `test-install`
+- `tools/`: `convert-agent.py` (used by `install`), `test-install`, and
+  `check`, which runs every check before a commit
 - `docs/` ([`harnesses.md`](docs/harnesses.md)): where each harness reads
   what, and why
 - `tasks/`: one directory for each decision: its options, evidence and inputs
@@ -62,4 +63,4 @@ under **Memory files**.
 
 ## Check a change
 
-Run the commands in "Before you commit" in [`AGENTS.md`](AGENTS.md).
+Run `tools/check` ("Before you commit" in [`AGENTS.md`](AGENTS.md)).

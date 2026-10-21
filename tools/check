@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Run every check before a commit. Usage: tools/check
+#
+# The two test-install runs are independent, so they run at the same time.
+# The second one is the macOS case: bash 3.2 runs install, and
+# /usr/bin/python3 (3.9) runs tools/convert-agent.py (AGENTS.md).
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONVERTER="$REPO/tools/convert-agent.py"
+logs="$(mktemp -d)"
+trap 'rm -rf "$logs"' EXIT
+failures=0
+
+"$REPO/tools/test-install" bash >"$logs/bash" 2>&1 &
+bash_pid=$!
+PATH="/usr/bin:$PATH" "$REPO/tools/test-install" /bin/bash >"$logs/macos" 2>&1 &
+macos_pid=$!
+
+uvx ruff check --target-version py39 "$CONVERTER" || failures=$((failures + 1))
+uvx ruff format --check "$CONVERTER" || failures=$((failures + 1))
+uvx mypy --strict "$CONVERTER" || failures=$((failures + 1))
+
+# Wait for the test-install run $2, then show its summary, or what failed.
+finish() {
+    if wait "$2"; then
+        tail -n 1 "$logs/$1"
+    else
+        grep -v '^ok ' "$logs/$1"
+        failures=$((failures + 1))
+    fi
+}
+finish bash "$bash_pid"
+finish macos "$macos_pid"
+
+if [[ $failures -gt 0 ]]; then
+    echo "tools/check: $failures check(s) failed"
+    exit 1
+fi

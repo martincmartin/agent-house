@@ -41,12 +41,11 @@ Before you…
 ## Before you commit
 
 ```bash
-tools/test-install bash
-PATH="/usr/bin:$PATH" tools/test-install /bin/bash   # macOS: bash 3.2, Python 3.9
-uvx ruff check --target-version py39 tools/convert-agent.py
-uvx ruff format --check tools/convert-agent.py
-uvx mypy --strict tools/convert-agent.py
+tools/check
 ```
+
+It runs `tools/test-install` with bash, and again with bash 3.2 and Python 3.9
+(on macOS), and ruff and mypy on `tools/convert-agent.py`.
 
 When you change how `install` treats a case, add a check for it to
 `tools/test-install`.

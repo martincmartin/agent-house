@@ -117,23 +117,28 @@ def tool_list(fields: dict[str, str], key: str) -> set[str] | None:
 
 
 def denied_capabilities(fields: dict[str, str]) -> list[Capability]:
-    """What the subagent may not do, from Claude Code's tools and disallowedTools."""
-    allowed = tool_list(fields, "tools")
+    """What Claude Code's disallowedTools keeps the subagent from doing."""
     disallowed = tool_list(fields, "disallowedTools") or set()
-    denied = []
-    for capability in CAPABILITIES:
-        covered = set(capability.claude_tools)
-        if (allowed is not None and not covered & allowed) or covered & disallowed:
-            denied.append(capability)
-    return denied
+    return [
+        capability
+        for capability in CAPABILITIES
+        if set(capability.claude_tools) & disallowed
+    ]
 
 
 def allowed_capabilities(fields: dict[str, str]) -> list[Capability] | None:
-    """What a `tools` allowlist lets the subagent do; None without one."""
-    if "tools" not in fields:
+    """What Claude Code's `tools` allowlist lets the subagent do, less
+    disallowedTools; None without a `tools` list.
+    """
+    allowed = tool_list(fields, "tools")
+    if allowed is None:
         return None
     denied = denied_capabilities(fields)
-    return [capability for capability in CAPABILITIES if capability not in denied]
+    return [
+        capability
+        for capability in CAPABILITIES
+        if set(capability.claude_tools) & allowed and capability not in denied
+    ]
 
 
 def either(actions: list[str]) -> str:
@@ -160,7 +165,6 @@ def codex(fields: dict[str, str], body: str, header: str) -> str:
     the session that starts it. So the limits become an instruction.
     """
     allowed = allowed_capabilities(fields)
-    denied = denied_capabilities(fields)
     if allowed is not None:
         actions = [capability.action for capability in allowed]
         body += (
@@ -168,7 +172,7 @@ def codex(fields: dict[str, str], body: str, header: str) -> str:
             if actions
             else "\n\nUse no tools."
         )
-    elif denied:
+    elif denied := denied_capabilities(fields):
         body += f"\n\nDo not {either([capability.action for capability in denied])}."
     return "\n".join(
         [
@@ -220,7 +224,8 @@ def main() -> None:
         or sys.argv[1] not in FORMATS
         or not sys.argv[3].startswith("# ")
     ):
-        raise SystemExit(f"usage: {sys.argv[0]} codex|opencode SOURCE.md '# HEADER'")
+        formats = "|".join(FORMATS)
+        raise SystemExit(f"usage: {sys.argv[0]} {formats} SOURCE.md '# HEADER'")
 
     write = FORMATS[sys.argv[1]]
     path = Path(sys.argv[2])

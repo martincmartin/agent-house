@@ -68,10 +68,11 @@ instructions_name() {
     esac
 }
 
-# A directory that install writes into must be a directory of its own, not a
-# link. Its parents can be links. Returns 1, after a report, when the
-# directory cannot be used: then the caller skips what it would put there.
-make_dir() {
+# Make a directory that install writes into, and report its dangling links.
+# It must be a directory of its own, not a link. Its parents can be links.
+# Returns 1, after a report, when the directory cannot be used: then the
+# caller skips what it would put there.
+prepare_dir() {
     local dir="$1"
     if [[ -L "$dir" ]]; then
         report "$dir: is a link; expected a directory of its own"
@@ -83,6 +84,7 @@ make_dir() {
         report "$dir: could not make it"
         return 1
     fi
+    check_links "$dir"
 }
 
 make_link() {
@@ -149,68 +151,56 @@ check_links() {
     done
 }
 
-link_skills() {
+# Link each source ($2 and on) into the directory $1, under its own name.
+link_each() {
     local dir="$1"
-    local skill
-    make_dir "$dir" || return 0
-    for skill in "$USER_DIR"/skills/*; do
-        [[ "$skill" == *~ ]] && continue
-        if [[ ! -f "$skill/SKILL.md" ]]; then
-            report "$skill: not a skill directory (no SKILL.md)"
-            continue
-        fi
-        make_link "$skill" "$dir/${skill##*/}"
+    local source
+    shift
+    prepare_dir "$dir" || return 0
+    for source in "$@"; do
+        make_link "$source" "$dir/${source##*/}"
     done
 }
 
-link_agents() {
-    local dir="$1/agents"
-    local agent
-    make_dir "$dir" || return 0
-    for agent in "$USER_DIR"/agents/*; do
-        [[ "$agent" == *~ ]] && continue
-        if [[ "$agent" != *.md ]]; then
-            report "$agent: not a subagent file (*.md)"
-            continue
-        fi
-        make_link "$agent" "$dir/${agent##*/}"
-    done
-}
-
-# The comment that marks a file generated from the source subagent $1.
-generated_header() {
-    echo "${GENERATED_PREFIX}$1${GENERATED_SUFFIX}"
-}
-
-# The generated-file comment in the first two lines of a file, if any. Only a
-# regular file can be one that install generated, so only one is read.
-generated_marker() {
+# The source subagent that the generated-file comment in the first two lines
+# of the file $1 names, if it has one. Only a regular file can be one that
+# install generated, so only one is read.
+generated_source() {
+    local line
     [[ -f "$1" && ! -L "$1" ]] || return 0
-    head -n 2 "$1" | grep -F -- "$GENERATED_PREFIX" | head -n 1 || true
+    line="$(head -n 2 "$1" | grep -F -- "$GENERATED_PREFIX" | head -n 1 || true)"
+    [[ "$line" == "$GENERATED_PREFIX"*"$GENERATED_SUFFIX" ]] || return 0
+    line="${line#"$GENERATED_PREFIX"}"
+    echo "${line%"$GENERATED_SUFFIX"}"
 }
 
 # Codex and OpenCode cannot read Claude Code's subagent format, so install
-# writes their subagents from user/agents/ with tools/convert-agent.py. A
-# comment in the first two lines says the file was generated, and from what.
+# writes their subagents from the sources ($4 and on) with
+# tools/convert-agent.py. A comment in the first two lines says the file was
+# generated, and from what.
 generate_agents() {
     local dir="$1/agents"
     local format="$2"
     local extension="$3"
-    local agent name target header content existing
-    make_dir "$dir" || return 0
-    for agent in "$USER_DIR"/agents/*.md; do
+    local python=yes
+    local agent name target content existing
+    shift 3
+    prepare_dir "$dir" || return 0
+    # Python is needed only when there is a subagent to convert.
+    if [[ $# -gt 0 ]] && ! command -v python3 >/dev/null; then
+        report "python3 not found; it is needed to write the $format subagents"
+        python=""
+    fi
+    for agent in "$@"; do
         name="${agent##*/}"
         target="$dir/${name%.md}.$extension"
-        header="$(generated_header "$agent")"
-        if [[ (-e "$target" || -L "$target") && "$(generated_marker "$target")" != "$header" ]]; then
+        if [[ (-e "$target" || -L "$target") && "$(generated_source "$target")" != "$agent" ]]; then
             report "$target: exists and was not generated from $agent"
             continue
         fi
-        if ! command -v python3 >/dev/null; then
-            report "python3 not found; it is needed to write the $format subagents"
-            break
-        fi
-        if ! content="$(python3 "$HOUSE/tools/convert-agent.py" "$format" "$agent" "$header")"; then
+        [[ -n "$python" ]] || continue
+        if ! content="$(python3 "$HOUSE/tools/convert-agent.py" "$format" "$agent" \
+            "${GENERATED_PREFIX}${agent}${GENERATED_SUFFIX}")"; then
             report "$agent: could not convert it for $format"
             continue
         fi
@@ -229,11 +219,9 @@ generate_agents() {
     done
     # A generated file whose source is gone.
     for target in "$dir"/*."$extension"; do
-        header="$(generated_marker "$target")"
-        if [[ "$header" == "${GENERATED_PREFIX}${USER_DIR}/agents/"* ]]; then
-            agent="${header#"$GENERATED_PREFIX"}"
-            agent="${agent%"$GENERATED_SUFFIX"}"
-            [[ -e "$agent" ]] || report "$target: generated from $agent, which no longer exists"
+        agent="$(generated_source "$target")"
+        if [[ "$agent" == "$USER_DIR/agents/"* && ! -e "$agent" ]]; then
+            report "$target: generated from $agent, which no longer exists"
         fi
     done
 }
@@ -244,25 +232,22 @@ install_harness() {
     local harness="$1"
     local dir
     dir="$(harness_dir "$harness")"
-    make_dir "$dir" || return 0
+    prepare_dir "$dir" || return 0
 
     make_link "$USER_DIR/AGENTS.md" "$dir/$(instructions_name "$harness")"
     case "$harness" in
-        codex) generate_agents "$dir" codex toml ;;
-        opencode) generate_agents "$dir" opencode md ;;
-        *) link_agents "$dir" ;;
+        codex) generate_agents "$dir" codex toml ${agents[@]+"${agents[@]}"} ;;
+        opencode) generate_agents "$dir" opencode md ${agents[@]+"${agents[@]}"} ;;
+        *) link_each "$dir/agents" ${agents[@]+"${agents[@]}"} ;;
     esac
     if [[ "$harness" == claude ]]; then
-        link_skills "$dir/skills"
-        check_links "$dir/skills"
+        link_each "$dir/skills" ${skills[@]+"${skills[@]}"}
         if [[ -e "$dir/AGENTS.md" || -L "$dir/AGENTS.md" ]]; then
             report "$dir/AGENTS.md: Claude Code reads it only as a project file of an ancestor directory, so with CLAUDE.md it can load twice (docs/harnesses.md)"
         fi
     else
         check_links "$dir/skills" old-skills
     fi
-    check_links "$dir"
-    check_links "$dir/agents"
 }
 
 # Each name is checked to be one harness, so the list splits safely on spaces.
@@ -282,14 +267,33 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The sources in user/, each checked once, before the harnesses that use them.
+skills=()
+for source in "$USER_DIR"/skills/*; do
+    [[ "$source" == *~ ]] && continue
+    if [[ -f "$source/SKILL.md" ]]; then
+        skills+=("$source")
+    else
+        report "$source: not a skill directory (no SKILL.md)"
+    fi
+done
+agents=()
+for source in "$USER_DIR"/agents/*; do
+    [[ "$source" == *~ ]] && continue
+    if [[ "$source" == *.md ]]; then
+        agents+=("$source")
+    else
+        report "$source: not a subagent file (*.md)"
+    fi
+done
+
 shared_skills=""
 for harness in ${harnesses:-$ALL_HARNESSES}; do
     install_harness "$harness"
     [[ "$harness" == claude ]] || shared_skills=yes
 done
 if [[ -n "$shared_skills" ]]; then
-    link_skills "$SHARED_SKILLS_DIR"
-    check_links "$SHARED_SKILLS_DIR"
+    link_each "$SHARED_SKILLS_DIR" ${skills[@]+"${skills[@]}"}
 fi
 
 if [[ $problems -gt 0 ]]; then
