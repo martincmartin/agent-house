@@ -18,9 +18,10 @@ The docs are the project's memory. Put what a future agent needs in the
 project, not in a harness's memory. If your harness keeps memories (Claude
 Code does): before you save one, show it to the user and offer to put it in
 the most general AGENTS.md or doc where it is still true (for example
-`~/Develop/agent-house/user/AGENTS.md` for all work,
-`~/Develop/slidev/AGENTS.md` for all Slidev projects, which you create if it
-does not exist yet, or a project's own AGENTS.md or doc), with the exact text.
+`user/AGENTS.md` in the agent-house repo for all work: your user-level
+instructions file links to it; `~/Develop/slidev/AGENTS.md` for all Slidev
+projects, which you create if it does not exist yet, or a project's own
+AGENTS.md or doc), with the exact text.
 Save a memory only if the user prefers that. When a memory's rule moves into a
 file, delete the memory.
 

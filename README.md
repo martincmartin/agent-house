@@ -38,8 +38,8 @@ it, and run `install` again.
 
 ### A laptop
 
-`~/init-files/install-me` clones this repo to `~/Develop/agent-house` if it is
-not there, and then runs `install`.
+`~/init-files/install-me` clones this repo to `~/Develop/agent-house/main` if
+it is not there, and then runs `install`.
 
 ### Claude Code cloud sessions
 
@@ -62,7 +62,4 @@ under **Memory files**.
 
 ## Check a change
 
-```bash
-tools/test-install bash
-tools/test-install /bin/bash   # macOS: install must work with bash 3.2
-```
+Run the commands in "Before you commit" in [`AGENTS.md`](AGENTS.md).

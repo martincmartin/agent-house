@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Test ../install in a throwaway $HOME. Usage: tools/test-install [BASH]
-# BASH is the shell that runs install (default: bash). Run it with /bin/bash
-# too on macOS: install must work with bash 3.2.
+# BASH is the shell that runs install (default: bash). On macOS, also run
+# PATH="/usr/bin:$PATH" tools/test-install /bin/bash: install must work with
+# bash 3.2, and tools/convert-agent.py with Python 3.9.
 
 set -euo pipefail
 
@@ -29,11 +30,15 @@ permissionMode: default
 
 Review the change, and write no files.
 EOF
+# A skill and the probe subagent, for the checks that need one of each.
+skills=("$HOUSE"/user/skills/*)
+probe_skill="${skills[0]}"
+probe_agent="$HOUSE/user/agents/probe-reviewer.md"
 # The failed-write test limits a file to one block (ulimit -f 1), so the
 # probe's generated files must be larger than that.
 for line in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     echo "Line $line: padding, so that a converted copy is larger than one block." \
-        >>"$HOUSE/user/agents/probe-reviewer.md"
+        >>"$probe_agent"
 done
 
 # Run install with a fresh or given home, and no harness override variables.
@@ -186,7 +191,7 @@ check "CLAUDE_CONFIG_DIR is used" links_to "$home/my claude/CLAUDE.md" "$HOUSE/u
 check "CODEX_HOME is used" links_to "$home/my codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
 check "XDG_CONFIG_HOME is used" links_to "$home/my config/opencode/AGENTS.md" "$HOUSE/user/AGENTS.md"
 check "PI_CODING_AGENT_DIR is used" links_to "$home/my pi/AGENTS.md" "$HOUSE/user/AGENTS.md"
-check "Claude's skills follow CLAUDE_CONFIG_DIR" test -L "$home/my claude/skills/$(basename "$skill")"
+check "Claude's skills follow CLAUDE_CONFIG_DIR" test -L "$home/my claude/skills/$(basename "$probe_skill")"
 check "overrides leave the default directories alone" \
     test ! -e "$home/.claude" -a ! -e "$home/.codex" -a ! -e "$home/.config" -a ! -e "$home/.pi"
 
@@ -276,7 +281,7 @@ done
 status=0
 run_install "$home" --harness opencode || status=$?
 check "an OpenCode subagent linked the old way fails the run" status_is 1
-check "an OpenCode subagent linked the old way is kept" test -L "$home/.config/opencode/agents/$(basename "$agent")"
+check "an OpenCode subagent linked the old way is kept" test -L "$home/.config/opencode/agents/$(basename "$probe_agent")"
 
 # The layout before skills moved to ~/.agents/skills.
 home="$(new_home old-skills)"
@@ -288,7 +293,7 @@ status=0
 run_install "$home" --harness codex || status=$?
 check "an old skill link fails the run" status_is 1
 check "an old skill link is reported" err_says "skills now go in"
-check "an old skill link is kept" test -L "$home/.codex/skills/$(basename "$skill")"
+check "an old skill link is kept" test -L "$home/.codex/skills/$(basename "$probe_skill")"
 ln -s "$HOUSE/user/skills/gone" "$home/.codex/skills/gone"
 status=0
 run_install "$home" --harness codex || status=$?
@@ -314,7 +319,7 @@ run_install "$home" || status=$?
 check "a file at ~/.agents fails the run" status_is 1
 check "a file at ~/.agents is reported" err_says ".agents/skills: could not make it"
 check "a file at ~/.agents does not stop the other harnesses" links_to "$home/.pi/agent/AGENTS.md" "$HOUSE/user/AGENTS.md"
-check "a file at ~/.agents does not stop the subagents" test -e "$home/.config/opencode/agents/$(basename "$agent")"
+check "a file at ~/.agents does not stop the subagents" test -e "$home/.config/opencode/agents/$(basename "$probe_agent")"
 check "a file at ~/.agents gets the summary" err_says "problem(s); nothing was removed"
 check "a file at ~/.agents is kept" test -f "$home/.agents"
 check "a file at ~/.agents is reported once" test "$(grep -c '.agents/skills: could not make it' "$scratch/err")" -eq 1
@@ -325,11 +330,11 @@ touch "$home/.codex"
 status=0
 run_install "$home" --harness codex || status=$?
 check "a file at ~/.codex fails the run" status_is 1
-check "a file at ~/.codex does not stop the shared skills" links_to "$home/.agents/skills/$(basename "$skill")" "$skill"
+check "a file at ~/.codex does not stop the shared skills" links_to "$home/.agents/skills/$(basename "$probe_skill")" "$probe_skill"
 
 # Only a regular file can be a generated subagent, so nothing else is read.
 home="$(new_home not-regular)"
-mkdir -p "$home/.codex/agents/unrelated.toml" "$home/.codex/agents/$(basename "$agent" .md).toml"
+mkdir -p "$home/.codex/agents/unrelated.toml" "$home/.codex/agents/$(basename "$probe_agent" .md).toml"
 mkfifo "$home/.codex/agents/fifo.toml"
 status=0
 run_install "$home" --harness codex &
@@ -357,7 +362,7 @@ ln -s "$home/elsewhere" "$home/.agents"
 status=0
 run_install "$home" --harness codex || status=$?
 check "a linked parent of a skills directory is ordinary" status_is 0
-check "a linked parent of a skills directory is used" test -L "$home/elsewhere/skills/$(basename "$skill")"
+check "a linked parent of a skills directory is used" test -L "$home/elsewhere/skills/$(basename "$probe_skill")"
 home="$(new_home skills-link)"
 mkdir -p "$home/elsewhere" "$home/.agents"
 ln -s "$home/elsewhere" "$home/.agents/skills"
@@ -398,7 +403,7 @@ check "ordinary override directories with trailing slashes are used" links_to "$
 # makes the write fail with an error, instead of stopping install.
 home="$(new_home write-fails)"
 run_install "$home" --harness codex
-toml="$home/.codex/agents/$(basename "$agent" .md).toml"
+toml="$home/.codex/agents/$(basename "$probe_agent" .md).toml"
 sed -i.bak '2s/.*/name = "changed"/' "$toml" && rm "$toml.bak"
 cp "$toml" "$scratch/before.toml"
 status=0
@@ -443,14 +448,21 @@ description: A probe.
 $1"
 }
 denies() { grep -q -x "  $1: deny" "$scratch/out"; }
-allows() { ! grep -q -x "  $1: deny" "$scratch/out"; }
+allows() { grep -q -x "  $1: allow" "$scratch/out"; }
+permission_lines() { sed -n '/^permission:$/,/^---$/p' "$scratch/out" | grep '^  '; }
 convert "disallowedTools: Edit, Write"
 check "disallowedTools Edit denies edit" denies edit
-check "disallowedTools Edit leaves bash" allows bash
-convert "tools: Read, Glob, Grep, Bash"
-check "a tools list leaves its tools" allows bash
-check "a tools list denies the others" denies edit
-check "a tools list denies webfetch" denies webfetch
+check "disallowedTools Edit leaves bash" bash -c '! grep -q "bash:" "$1"' _ "$scratch/out"
+check "a denylist keeps OpenCode's defaults for other tools" bash -c '! grep -q -F "\"*\"" "$1"' _ "$scratch/out"
+# OpenCode allows each tool that no rule denies, and the last matching rule wins.
+convert "tools: Read, Grep"
+check "an allowlist first denies every tool, MCP tools too" test "$(permission_lines | head -n 1)" = '  "*": deny'
+check "an allowlist then allows read" allows read
+check "an allowlist then allows grep" allows grep
+check "an allowlist allows no other tool" test "$(permission_lines | wc -l)" -eq 3
+convert "tools: Read, Bash
+disallowedTools: Bash"
+check "disallowedTools narrows an allowlist" bash -c '! grep -q "bash:" "$1"' _ "$scratch/out"
 convert "model: inherit"
 check "model is left out" bash -c '! grep -q "^model:" "$1"' _ "$scratch/out"
 status=0
@@ -554,11 +566,31 @@ convert_codex() {
 }
 convert_codex "disallowedTools: Edit, Write"
 check "Codex gets the limits as an instruction" grep -q -x 'Do not edit or write files.' "$scratch/out"
-convert_codex "tools: Read, Glob, Grep, Bash, Edit, Write, WebFetch, WebSearch, Agent, TodoWrite, Skill"
-check "Codex gets no instruction when nothing is denied" bash -c '! grep -q "^Do not" "$1"' _ "$scratch/out"
+convert_codex "model: inherit"
+check "Codex gets no instruction when nothing is limited" bash -c '! grep -q -E "^(Do not|Use )" "$1"' _ "$scratch/out"
+convert_codex "tools: Read, Grep"
+check "Codex gets an allowlist as an instruction" grep -q -x 'Use tools only to read files or search file contents.' "$scratch/out"
+convert_codex "tools: Read
+disallowedTools: Read"
+check "Codex gets an empty allowlist as an instruction" grep -q -x 'Use no tools.' "$scratch/out"
+
+# TOML has no raw control characters, and Codex output must parse.
+printf -- '---\nname: probe\ndescription: A DEL \177 and a form feed \f.\n---\nBody with """quotes""" and a \\ backslash.\nLine two.\n' >"$scratch/probe.md"
+python3 "$HOUSE/tools/convert-agent.py" codex "$scratch/probe.md" "# Generated by test" >"$scratch/out.toml" 2>"$scratch/err"
+if python3 -c 'import tomllib' 2>/dev/null; then
+    check "Codex output with control characters is valid TOML" python3 -c '
+import sys, tomllib
+with open(sys.argv[1], "rb") as file:
+    agent = tomllib.load(file)
+assert agent["description"] == "A DEL \x7f and a form feed \x0c."
+assert agent["developer_instructions"].startswith("Body with \"\"\"quotes\"\"\" and a \\ backslash.\nLine two.")
+' "$scratch/out.toml"
+else
+    echo "skip  Codex output is valid TOML: this python3 has no tomllib (Python 3.11 or later)"
+fi
 
 if [[ $failures -gt 0 ]]; then
     echo "$failures check(s) failed"
     exit 1
 fi
-echo "all checks passed ($SHELL_UNDER_TEST, bash $("$SHELL_UNDER_TEST" -c 'echo "$BASH_VERSION"'))"
+echo "all checks passed ($SHELL_UNDER_TEST, bash $("$SHELL_UNDER_TEST" -c 'echo "$BASH_VERSION"'), $(python3 --version))"

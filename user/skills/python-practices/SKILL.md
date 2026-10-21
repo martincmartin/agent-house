@@ -9,8 +9,9 @@ You are an expert Python software engineer.
 - Strictly type all production functions, and methods, unless doing so would materially reduce clarity or is incompatible with an existing dynamic API. Use modern built-in generics.
 - Favor idiomatic Python (Pythonic), readability, comprehensions where appropriate, and standard library modules over custom re-implementations.
 - Avoid bare `except:` clauses. Catch exceptions only when you can handle, translate, add useful context to, or deliberately suppress them. Prefer specific exception types.
-- Name Python files with underscores, not hyphens (`skeleton_watch.py`, not
-  `skeleton-watch.py`), so that other scripts can import them.
+- Name a Python module that other code can import with underscores, not
+  hyphens (`skeleton_watch.py`, not `skeleton-watch.py`). A script that is only
+  run by its path, as a command, can use hyphens.
 - Format and lint with `ruff format` and `ruff check`.
 - Choose the kind of class by what it is:
   - a value, equal to any other with the same fields: `@dataclass(frozen=True)`;
@@ -31,4 +32,4 @@ You are an expert Python software engineer.
     install packages globally.
   - Create a uv script 'validate' that:
     - Checks types with `mypy --strict` and `pyright`.
-    - Formats and lint with `ruff format` and `ruff check`.
+    - Formats and lints with `ruff format` and `ruff check`.

@@ -3,7 +3,7 @@
 **Covers:** the directory, instruction file, skills and subagents that `install`
 sets up for each harness, and the facts that decided each one.
 **Read before** you change `install` or `tools/convert-agent.py`, add a harness,
-or move a link.
+move a link, or add a subagent key.
 
 The paths below are the defaults. `install` honours each harness's own override
 variable. The text says how each fact was found. Harnesses change their search
@@ -74,8 +74,9 @@ syntax, including block scalars, YAML lists, nested fields, inline comments,
 escapes in double-quoted strings, and duplicate keys. It reports an error before
 it writes output.
 
-Python 3 is needed only when a source subagent needs conversion. Without source
-subagents, `install` still checks for stale generated files and temporary files.
+Python 3.9 or later is needed only when a source subagent needs conversion
+(`AGENTS.md` says why 3.9). Without source subagents, `install` still checks
+for stale generated files and temporary files.
 
 - **The limits** come from Claude Code's `tools` (an allowlist) and
   `disallowedTools`. `CAPABILITIES` in `tools/convert-agent.py` lists each
@@ -87,8 +88,8 @@ subagents, `install` still checks for stale generated files and temporary files.
   that starts it, and its `sandbox_mode` does not override that
   ([subagents docs](https://learn.chatgpt.com/docs/agent-configuration/subagents),
   2026-10-21). So the limits become the last sentence of
-  `developer_instructions` ("Do not edit or write files, …"). Nothing enforces
-  it.
+  `developer_instructions`: "Use tools only to read files or …" for a `tools`
+  allowlist, else "Do not edit or write files, …". Nothing enforces it.
 - **OpenCode** gives `tools:` and `model:` other meanings: `tools` is a map of
   tool to `true` or `false` (and deprecated for `permission:`), and `model` is
   `provider/model-id`. It passes keys that it does not know to the model
@@ -97,8 +98,14 @@ subagents, `install` still checks for stale generated files and temporary files.
   only `description`, `mode: subagent` and `permission:`. `model` is left out:
   then the subagent uses the model of the agent that calls it.
 - **OpenCode's `permission:`** enforces the limits. This OpenCode calls its
-  shell permission `bash`, and its `edit` covers editing and writing files
-  (checked with `opencode debug agent`, 2026-10-21).
+  shell permission `bash`, and its `edit` covers editing and writing files.
+  It allows each tool that no rule denies, MCP tools too, and the last
+  matching rule wins. So a `tools` allowlist becomes `"*": deny`, then an
+  `allow` for each capability in the list. This also turns off OpenCode's
+  default `ask` before it reads a `.env` file. Without a `tools` list, each
+  capability that `disallowedTools` names gets a `deny`. (Checked with
+  `opencode debug agent`, which shows the rules and the tools that they turn
+  on, 2026-10-21.)
 - **The limits block tools, not actions,** in every harness. A subagent that
   keeps its shell (a reviewer keeps it, to read and run checks) can still
   write files and use the network through it. So "do not write files" is an

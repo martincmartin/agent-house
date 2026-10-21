@@ -81,7 +81,8 @@ def parse_agent(path: Path) -> tuple[dict[str, str], str]:
 
     frontmatter, body = match.groups()
     fields: dict[str, str] = {}
-    for line_number, line in enumerate(frontmatter.splitlines(), start=2):
+    # Split at newlines only: splitlines() also splits at a form feed and others.
+    for line_number, line in enumerate(frontmatter.split("\n"), start=2):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         field_match = re.fullmatch(r"([A-Za-z_][\w-]*)[ \t]*:[ \t]+(.*)", line)
@@ -127,14 +128,30 @@ def denied_capabilities(fields: dict[str, str]) -> list[Capability]:
     return denied
 
 
+def allowed_capabilities(fields: dict[str, str]) -> list[Capability] | None:
+    """What a `tools` allowlist lets the subagent do; None without one."""
+    if "tools" not in fields:
+        return None
+    denied = denied_capabilities(fields)
+    return [capability for capability in CAPABILITIES if capability not in denied]
+
+
+def either(actions: list[str]) -> str:
+    """Join actions as "a, b or c"."""
+    return ", ".join(actions[:-1]) + (" or " if len(actions) > 1 else "") + actions[-1]
+
+
 def toml_string(value: str) -> str:
-    """Encode a string as a TOML basic string."""
+    """Encode a string as a TOML basic string, multi-line if it has newlines."""
     value = value.replace("\\", "\\\\").replace('"', '\\"')
+    # TOML forbids the control characters other than tab and newline.
+    value = re.sub(
+        r"[\x00-\x08\x0b-\x1f\x7f]", lambda match: f"\\u{ord(match[0]):04X}", value
+    )
 
     if "\n" not in value:
         return f'"{value}"'
 
-    value = value.replace('"""', '\\"""')
     return f'"""\n{value}\n"""'
 
 
@@ -142,13 +159,17 @@ def codex(fields: dict[str, str], body: str, header: str) -> str:
     """Codex has no per-agent permissions: a custom agent runs in the sandbox of
     the session that starts it. So the limits become an instruction.
     """
+    allowed = allowed_capabilities(fields)
     denied = denied_capabilities(fields)
-    if denied:
-        actions = [capability.action for capability in denied]
-        listed = (
-            ", ".join(actions[:-1]) + (" or " if len(actions) > 1 else "") + actions[-1]
+    if allowed is not None:
+        actions = [capability.action for capability in allowed]
+        body += (
+            f"\n\nUse tools only to {either(actions)}."
+            if actions
+            else "\n\nUse no tools."
         )
-        body += f"\n\nDo not {listed}."
+    elif denied:
+        body += f"\n\nDo not {either([capability.action for capability in denied])}."
     return "\n".join(
         [
             header,
@@ -171,12 +192,21 @@ def opencode(fields: dict[str, str], body: str, header: str) -> str:
         f"description: {json.dumps(fields['description'])}",
         "mode: subagent",
     ]
-    denied = denied_capabilities(fields)
-    if denied:
+    # OpenCode allows each tool that no rule denies, and the last matching rule
+    # wins. So an allowlist denies everything first, MCP tools too.
+    allowed = allowed_capabilities(fields)
+    if allowed is None:
+        rules = [
+            f"{capability.opencode_permission}: deny"
+            for capability in denied_capabilities(fields)
+        ]
+    else:
+        rules = ['"*": deny'] + [
+            f"{capability.opencode_permission}: allow" for capability in allowed
+        ]
+    if rules:
         lines.append("permission:")
-        lines.extend(
-            f"  {capability.opencode_permission}: deny" for capability in denied
-        )
+        lines.extend(f"  {rule}" for rule in rules)
     lines.extend(["---", "", body])
     return "\n".join(lines)
 

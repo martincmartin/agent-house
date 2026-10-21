@@ -32,14 +32,18 @@ Before you…
   meant.
 - **`install` must work with bash 3.2** (macOS `/bin/bash`): no associative
   arrays, no `mapfile`, no `${var,,}`.
+- **`tools/convert-agent.py` must work with Python 3.9** (macOS
+  `/usr/bin/python3`): `~/init-files/install-me` runs `install` before it
+  installs Homebrew. No `match`, no `X | Y` outside annotations, and no library
+  call that is new in 3.10 or later.
 - **The repo is public.** Put no secrets or licence keys in it.
 
 ## Before you commit
 
 ```bash
 tools/test-install bash
-tools/test-install /bin/bash               # macOS: bash 3.2
-uvx ruff check tools/convert-agent.py
+PATH="/usr/bin:$PATH" tools/test-install /bin/bash   # macOS: bash 3.2, Python 3.9
+uvx ruff check --target-version py39 tools/convert-agent.py
 uvx ruff format --check tools/convert-agent.py
 uvx mypy --strict tools/convert-agent.py
 ```
