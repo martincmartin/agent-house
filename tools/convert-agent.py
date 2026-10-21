@@ -68,7 +68,9 @@ def scalar_text(value: str) -> str:
         in {"true", "false", "null", "yes", "no", "on", "off", "y", "n"}
         or re.search(r":(?:\s|$)|\s#", value)
     ):
-        raise ConversionError("unsupported YAML value; use a single-line string")
+        raise ConversionError(
+            "unsupported YAML value; quote it, or use a single-line string"
+        )
     return value
 
 

@@ -63,16 +63,12 @@ subagents. `install` links them for Claude Code and Pi, and
 first two lines of a generated file names its source. `install` reports a file
 with that name that it did not write, or whose source is gone, and leaves it.
 
-Conversion supports flat YAML fields with one string per line. Keys can have
-spaces before the colon. Blank lines and comment lines are allowed. Strings
-can be plain, single-quoted, or double-quoted without escapes. In single-quoted
-strings, use two single quotes for one quote. Quote text that contains a colon
-followed by whitespace, or a hash after whitespace. Write tool lists as strings
-with commas between tools. Quote text that starts with a digit, plus sign, minus
-sign, or period. Quote YAML boolean and null words. The converter rejects other
-syntax, including block scalars, YAML lists, nested fields, inline comments,
-escapes in double-quoted strings, and duplicate keys. It reports an error before
-it writes output.
+Conversion reads only flat fields, each with a single-line string: plain,
+single-quoted (two single quotes for one quote), or double-quoted without
+escapes. Write a tool list as one string, with commas between the tools. The
+converter refuses anything else, and names its line, before it writes output.
+`parse_agent` and `scalar_text` in `tools/convert-agent.py` hold the exact
+rules. If a plain value is refused, quote it.
 
 Python 3.9 or later is needed only when a source subagent needs conversion
 (`AGENTS.md` says why 3.9). Without source subagents, `install` still checks

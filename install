@@ -4,9 +4,7 @@
 #
 # Usage: install [--harness claude|codex|opencode|pi]...
 #
-# With no --harness, it sets up all four. It never removes or replaces anything
-# that it did not write: when something is not as expected, it reports it, goes
-# on with the rest, and exits with status 1. Keep it compatible with bash 3.2
+# With no --harness, it sets up all four. Keep it compatible with bash 3.2
 # (macOS /bin/bash).
 
 set -euo pipefail
