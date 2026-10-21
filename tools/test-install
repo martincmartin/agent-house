@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# Test ../install in a throwaway $HOME. Usage: tools/test-install [BASH]
+# BASH is the shell that runs install (default: bash). Run it with /bin/bash
+# too on macOS: install must work with bash 3.2.
+
+set -euo pipefail
+
+SHELL_UNDER_TEST="${1:-bash}"
+HOUSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+failures=0
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+
+# Run install with a fresh or given home, and no harness override variables.
+run_install() {
+    local home="$1"
+    shift
+    env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u XDG_CONFIG_HOME -u PI_CODING_AGENT_DIR \
+        HOME="$home" "$SHELL_UNDER_TEST" "$HOUSE/install" "$@" >"$scratch/out" 2>"$scratch/err"
+}
+
+check() {
+    local description="$1"
+    shift
+    if "$@"; then
+        echo "ok    $description"
+    else
+        echo "FAIL  $description"
+        sed 's/^/      /' "$scratch/err"
+        failures=$((failures + 1))
+    fi
+}
+
+links_to() { [[ -L "$1" && "$(readlink "$1")" == "$2" ]]; }
+status_is() { [[ "$status" == "$1" ]]; }
+err_says() { grep -q -- "$1" "$scratch/err"; }
+out_is_empty() { [[ ! -s "$scratch/out" && ! -s "$scratch/err" ]]; }
+
+new_home() {
+    local home="$scratch/home-$1"
+    mkdir -p "$home"
+    echo "$home"
+}
+
+# Every harness, from nothing.
+home="$(new_home fresh)"
+status=0
+run_install "$home" || status=$?
+check "fresh install succeeds" status_is 0
+check "Claude reads user/AGENTS.md as CLAUDE.md" links_to "$home/.claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
+check "Codex AGENTS.md" links_to "$home/.codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "OpenCode AGENTS.md" links_to "$home/.config/opencode/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "Pi AGENTS.md" links_to "$home/.pi/agent/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "no Claude AGENTS.md" test ! -e "$home/.claude/AGENTS.md"
+for skill in "$HOUSE"/user/skills/*; do
+    name="$(basename "$skill")"
+    check "skill $name in .claude/skills" links_to "$home/.claude/skills/$name" "$skill"
+    check "skill $name in .agents/skills" links_to "$home/.agents/skills/$name" "$skill"
+    for dir in .codex .config/opencode .pi/agent; do
+        check "skill $name not in $dir/skills" test ! -e "$home/$dir/skills/$name"
+    done
+done
+for agent in "$HOUSE"/user/agents/*.md; do
+    name="$(basename "$agent" .md)"
+    for dir in .claude .pi/agent; do
+        check "subagent $name in $dir" links_to "$home/$dir/agents/$name.md" "$agent"
+    done
+    check "Codex subagent $name is generated" grep -q '^developer_instructions = ' "$home/.codex/agents/$name.toml"
+    opencode_agent="$home/.config/opencode/agents/$name.md"
+    check "OpenCode subagent $name is generated" grep -q -x 'mode: subagent' "$opencode_agent"
+    check "OpenCode subagent $name has only OpenCode's keys" \
+        bash -c '! grep -q -E "^(name|tools|disallowedTools|model|permissionMode):" "$1"' _ "$opencode_agent"
+done
+
+# A second run changes nothing and says nothing. "Changes nothing" is checked
+# by modification time: a rewritten file, a new link or a temporary file each
+# make something newer than the marker.
+touch "$scratch/marker"
+sleep 1
+status=0
+run_install "$home" || status=$?
+check "second run succeeds" status_is 0
+check "second run is silent" out_is_empty
+check "second run changes no file" test -z "$(find "$home" -newer "$scratch/marker")"
+
+# Files that install does not own are ordinary: the harnesses' own files, and
+# the user's own skills and subagents. A run with them is still silent.
+mkdir -p "$home/.codex/skills/.system" "$home/.claude/skills/synced/org/docx" "$home/my-skill"
+echo "# Codex config" >"$home/.codex/config.toml"
+ln -s "$home/my-skill" "$home/.claude/skills/my-skill"
+ln -s "$home/my-skill" "$home/.agents/skills/my-skill"
+echo "mine" >"$home/.claude/agents/my-agent.md"
+echo "mine" >"$home/.config/opencode/agents/my-agent.md"
+status=0
+run_install "$home" || status=$?
+check "a run with files that install does not own succeeds" status_is 0
+check "a run with files that install does not own is silent" out_is_empty
+
+# The cloud setup script: Claude only.
+home="$(new_home claude-only)"
+status=0
+run_install "$home" --harness claude || status=$?
+check "--harness claude succeeds" status_is 0
+check "--harness claude sets up Claude" links_to "$home/.claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
+check "--harness claude leaves Codex alone" test ! -e "$home/.codex"
+status=0
+run_install "$home" --harness claude || status=$?
+check "a second --harness claude run succeeds" status_is 0
+check "a second --harness claude run is silent" out_is_empty
+status=0
+run_install "$home" || status=$?
+check "a later run for all harnesses adds the others" links_to "$home/.codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "a later run for all harnesses succeeds" status_is 0
+
+# Each harness's override variable, with a space in each path.
+home="$(new_home overrides)"
+status=0
+env CLAUDE_CONFIG_DIR="$home/my claude" CODEX_HOME="$home/my codex" \
+    XDG_CONFIG_HOME="$home/my config" PI_CODING_AGENT_DIR="$home/my pi" \
+    HOME="$home" "$SHELL_UNDER_TEST" "$HOUSE/install" >"$scratch/out" 2>"$scratch/err" || status=$?
+check "overrides succeed" status_is 0
+check "CLAUDE_CONFIG_DIR is used" links_to "$home/my claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
+check "CODEX_HOME is used" links_to "$home/my codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "XDG_CONFIG_HOME is used" links_to "$home/my config/opencode/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "PI_CODING_AGENT_DIR is used" links_to "$home/my pi/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "Claude's skills follow CLAUDE_CONFIG_DIR" test -L "$home/my claude/skills/$(basename "$skill")"
+check "overrides leave the default directories alone" \
+    test ! -e "$home/.claude" -a ! -e "$home/.codex" -a ! -e "$home/.config" -a ! -e "$home/.pi"
+
+# Arguments.
+status=0
+run_install "$(new_home two-names)" --harness "codex opencode" || status=$?
+check "two harnesses in one --harness are a usage error" status_is 2
+status=0
+run_install "$(new_home repeated)" --harness codex --harness pi || status=$?
+check "--harness can be repeated" status_is 0
+status=0
+run_install "$(new_home bad-harness)" --harness emacs || status=$?
+check "an unknown harness is a usage error" status_is 2
+status=0
+run_install "$(new_home bad-arg)" --frobnicate || status=$?
+check "an unknown argument is a usage error" status_is 2
+
+# Each unusual case is reported, and left as it was.
+home="$(new_home dangling)"
+mkdir -p "$home/.pi/agent/skills"
+ln -s "$scratch/gone" "$home/.pi/agent/skills/gone"
+status=0
+run_install "$home" || status=$?
+check "a dangling link fails the run" status_is 1
+check "a dangling link is reported" err_says "skills/gone: dangling link"
+check "a dangling link is kept" test -L "$home/.pi/agent/skills/gone"
+
+home="$(new_home elsewhere)"
+mkdir -p "$home/.codex"
+ln -s "$scratch" "$home/.codex/AGENTS.md"
+status=0
+run_install "$home" || status=$?
+check "a link to elsewhere fails the run" status_is 1
+check "a link to elsewhere is reported" err_says ".codex/AGENTS.md: links to"
+check "a link to elsewhere is kept" links_to "$home/.codex/AGENTS.md" "$scratch"
+
+home="$(new_home real-file)"
+mkdir -p "$home/.config/opencode"
+echo mine >"$home/.config/opencode/AGENTS.md"
+status=0
+run_install "$home" || status=$?
+check "a real file fails the run" status_is 1
+check "a real file is kept" grep -q mine "$home/.config/opencode/AGENTS.md"
+
+home="$(new_home claude-agents-md)"
+mkdir -p "$home/.claude"
+ln -s "$HOUSE/user/AGENTS.md" "$home/.claude/AGENTS.md"
+status=0
+run_install "$home" --harness claude || status=$?
+check "a Claude AGENTS.md fails the run" status_is 1
+check "a Claude AGENTS.md is kept" test -L "$home/.claude/AGENTS.md"
+
+home="$(new_home codex-hand-made)"
+mkdir -p "$home/.codex/agents"
+for agent in "$HOUSE"/user/agents/*.md; do
+    echo "# mine" >"$home/.codex/agents/$(basename "$agent" .md).toml"
+done
+status=0
+run_install "$home" --harness codex || status=$?
+check "a Codex subagent that install did not write fails the run" status_is 1
+check "a Codex subagent that install did not write is kept" grep -q -x '# mine' "$home"/.codex/agents/*.toml
+
+home="$(new_home codex-stale)"
+mkdir -p "$home/.codex/agents"
+echo "# Generated by agent-house install from $HOUSE/user/agents/gone.md. Do not edit it: edit the source and run install again." \
+    >"$home/.codex/agents/gone.toml"
+status=0
+run_install "$home" --harness codex || status=$?
+check "a generated Codex subagent without a source fails the run" status_is 1
+check "a generated Codex subagent without a source is kept" test -e "$home/.codex/agents/gone.toml"
+
+home="$(new_home opencode-stale)"
+mkdir -p "$home/.config/opencode/agents"
+printf -- '---\n# Generated by agent-house install from %s/user/agents/gone.md. Do not edit it: edit the source and run install again.\nmode: subagent\n---\n' \
+    "$HOUSE" >"$home/.config/opencode/agents/gone.md"
+status=0
+run_install "$home" --harness opencode || status=$?
+check "a generated OpenCode subagent without a source fails the run" status_is 1
+check "a generated OpenCode subagent without a source is reported" err_says "gone.md: generated from"
+check "a generated OpenCode subagent without a source is kept" test -e "$home/.config/opencode/agents/gone.md"
+
+home="$(new_home opencode-link)"
+mkdir -p "$home/.config/opencode/agents"
+for agent in "$HOUSE"/user/agents/*.md; do
+    ln -s "$agent" "$home/.config/opencode/agents/$(basename "$agent")"
+done
+status=0
+run_install "$home" --harness opencode || status=$?
+check "an OpenCode subagent linked the old way fails the run" status_is 1
+check "an OpenCode subagent linked the old way is kept" test -L "$home/.config/opencode/agents/$(basename "$agent")"
+
+# The layout before skills moved to ~/.agents/skills.
+home="$(new_home old-skills)"
+mkdir -p "$home/.codex/skills"
+for skill in "$HOUSE"/user/skills/*; do
+    ln -s "$skill" "$home/.codex/skills/$(basename "$skill")"
+done
+status=0
+run_install "$home" --harness codex || status=$?
+check "an old skill link fails the run" status_is 1
+check "an old skill link is reported" err_says "skills now go in"
+check "an old skill link is kept" test -L "$home/.codex/skills/$(basename "$skill")"
+ln -s "$HOUSE/user/skills/gone" "$home/.codex/skills/gone"
+status=0
+run_install "$home" --harness codex || status=$?
+check "an old skill link that dangles is reported as dangling" err_says "skills/gone: dangling link"
+check "an old skill link that dangles is reported as old" err_says "skills/gone: links to a skill here"
+
+# A dangling link in the shared ~/.agents/skills is reported once, not once
+# for each harness that reads it.
+home="$(new_home shared-dangling)"
+mkdir -p "$home/.agents/skills"
+ln -s "$scratch/gone" "$home/.agents/skills/gone"
+status=0
+run_install "$home" || status=$?
+check "a dangling link in ~/.agents/skills fails the run" status_is 1
+check "a dangling link in ~/.agents/skills is reported once" \
+    test "$(grep -c 'skills/gone: dangling link' "$scratch/err")" -eq 1
+
+# A directory that cannot be used stops only what goes in it.
+home="$(new_home agents-file)"
+touch "$home/.agents"
+status=0
+run_install "$home" || status=$?
+check "a file at ~/.agents fails the run" status_is 1
+check "a file at ~/.agents is reported" err_says ".agents/skills: could not make it"
+check "a file at ~/.agents does not stop the other harnesses" links_to "$home/.pi/agent/AGENTS.md" "$HOUSE/user/AGENTS.md"
+check "a file at ~/.agents does not stop the subagents" test -e "$home/.config/opencode/agents/$(basename "$agent")"
+check "a file at ~/.agents gets the summary" err_says "problem(s); nothing was removed"
+check "a file at ~/.agents is kept" test -f "$home/.agents"
+check "a file at ~/.agents is reported once" test "$(grep -c '.agents/skills: could not make it' "$scratch/err")" -eq 1
+
+# The shared skills do not depend on a harness's own directory.
+home="$(new_home codex-file)"
+touch "$home/.codex"
+status=0
+run_install "$home" --harness codex || status=$?
+check "a file at ~/.codex fails the run" status_is 1
+check "a file at ~/.codex does not stop the shared skills" links_to "$home/.agents/skills/$(basename "$skill")" "$skill"
+
+# Only a regular file can be a generated subagent, so nothing else is read.
+home="$(new_home not-regular)"
+mkdir -p "$home/.codex/agents/unrelated.toml" "$home/.codex/agents/$(basename "$agent" .md).toml"
+mkfifo "$home/.codex/agents/fifo.toml"
+status=0
+run_install "$home" --harness codex &
+install_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    kill -0 "$install_pid" 2>/dev/null || break
+    sleep 0.5
+done
+if kill -0 "$install_pid" 2>/dev/null; then
+    kill "$install_pid"
+    wait "$install_pid" || true
+    status=hung
+else
+    wait "$install_pid" || status=$?
+fi
+check "a FIFO named like a generated subagent is not read" bash -c '[[ "$1" != hung ]]' _ "$status"
+check "a directory at a generated subagent's name fails the run" status_is 1
+check "a directory at a generated subagent's name is reported" err_says "toml: exists and was not generated"
+check "a directory named like a generated subagent is not read" bash -c '! grep -q "unrelated.toml" "$1"' _ "$scratch/err"
+
+# A directory that install writes into must not be a link; its parents can be.
+home="$(new_home agents-link)"
+mkdir "$home/elsewhere"
+ln -s "$home/elsewhere" "$home/.agents"
+status=0
+run_install "$home" --harness codex || status=$?
+check "a linked parent of a skills directory is ordinary" status_is 0
+check "a linked parent of a skills directory is used" test -L "$home/elsewhere/skills/$(basename "$skill")"
+home="$(new_home skills-link)"
+mkdir -p "$home/elsewhere" "$home/.agents"
+ln -s "$home/elsewhere" "$home/.agents/skills"
+status=0
+run_install "$home" --harness codex || status=$?
+check "a linked skills directory fails the run" status_is 1
+check "nothing is written through a linked skills directory" test -z "$(ls -A "$home/elsewhere")"
+
+# A write that fails leaves the old generated file as it was. Ignoring SIGXFSZ
+# makes the write fail with an error, instead of stopping install.
+home="$(new_home write-fails)"
+run_install "$home" --harness codex
+toml="$home/.codex/agents/$(basename "$agent" .md).toml"
+sed -i.bak '2s/.*/name = "changed"/' "$toml" && rm "$toml.bak"
+cp "$toml" "$scratch/before.toml"
+status=0
+env -u CODEX_HOME HOME="$home" "$SHELL_UNDER_TEST" -c 'trap "" XFSZ; ulimit -f 1; exec "$0" "$1" "$2" "$3"' \
+    "$SHELL_UNDER_TEST" "$HOUSE/install" --harness codex >"$scratch/out" 2>"$scratch/err" || status=$?
+check "a failed write fails the run" status_is 1
+check "a failed write is reported" err_says "could not write it; the old file is as it was"
+check "a failed write keeps the old file" cmp -s "$toml" "$scratch/before.toml"
+check "a failed write leaves no temporary file" test -z "$(ls -A "$home/.codex/agents" | grep -v '\.toml$')"
+
+home="$(new_home leftover)"
+mkdir -p "$home/.codex/agents"
+touch "$home/.codex/agents/.agent-house.abc123"
+status=0
+run_install "$home" --harness codex || status=$?
+check "a leftover temporary file fails the run" status_is 1
+check "a leftover temporary file is kept" test -e "$home/.codex/agents/.agent-house.abc123"
+
+# A directory that cannot be read is reported, not taken as empty. (Root can
+# read it anyway.)
+if [[ "$(id -u)" != 0 ]]; then
+    home="$(new_home unreadable)"
+    run_install "$home" --harness pi
+    chmod 000 "$home/.pi/agent/agents"
+    status=0
+    run_install "$home" --harness pi || status=$?
+    chmod 755 "$home/.pi/agent/agents"
+    check "an unreadable directory fails the run" status_is 1
+    check "an unreadable directory is reported" err_says "agents: could not read it"
+    check "an unreadable directory gets the summary" err_says "problem(s); nothing was removed"
+fi
+
+# The subagent converter's translation of Claude Code's tool lists.
+convert() {
+    printf -- '---\nname: probe\ndescription: A probe.\n%s\n---\nBody.\n' "$1" >"$scratch/probe.md"
+    python3 "$HOUSE/tools/convert-agent.py" opencode "$scratch/probe.md" "# Generated by test" \
+        >"$scratch/out" 2>"$scratch/err"
+}
+denies() { grep -q -x "  $1: deny" "$scratch/out"; }
+allows() { ! grep -q -x "  $1: deny" "$scratch/out"; }
+convert "disallowedTools: Edit, Write"
+check "disallowedTools Edit denies edit" denies edit
+check "disallowedTools Edit leaves bash" allows bash
+convert "tools: Read, Glob, Grep, Bash"
+check "a tools list leaves its tools" allows bash
+check "a tools list denies the others" denies edit
+check "a tools list denies webfetch" denies webfetch
+convert "model: inherit"
+check "model is left out" bash -c '! grep -q "^model:" "$1"' _ "$scratch/out"
+status=0
+convert "disallowedTools: Frobnicate" || status=$?
+check "an unknown tool is an error" status_is 1
+check "an unknown tool is named" err_says "Frobnicate"
+
+if [[ $failures -gt 0 ]]; then
+    echo "$failures check(s) failed"
+    exit 1
+fi
+echo "all checks passed ($SHELL_UNDER_TEST, bash $("$SHELL_UNDER_TEST" -c 'echo "$BASH_VERSION"'))"
