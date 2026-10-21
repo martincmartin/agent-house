@@ -55,19 +55,45 @@ class ConversionError(Exception):
     pass
 
 
+def scalar_text(value: str) -> str:
+    """Read the supported single-line YAML strings; reject other syntax."""
+    if re.fullmatch(r"'(?:[^']|'')*'", value):
+        return value[1:-1].replace("''", "'")
+    if re.fullmatch(r'"[^"\\]*"', value):
+        return value[1:-1]
+    if (
+        not value
+        or value[0] in "-+0123456789.~?:,[]{}#&*!|>'\"%@`"
+        or value.lower()
+        in {"true", "false", "null", "yes", "no", "on", "off", "y", "n"}
+        or re.search(r":(?:\s|$)|\s#", value)
+    ):
+        raise ConversionError("unsupported YAML value; use a single-line string")
+    return value
+
+
 def parse_agent(path: Path) -> tuple[dict[str, str], str]:
     text = path.read_text()
 
-    match = re.match(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", text, re.DOTALL)
+    match = re.match(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)(.*)\Z", text, re.DOTALL)
     if not match:
         raise ConversionError("missing YAML frontmatter")
 
     frontmatter, body = match.groups()
-    fields = dict(
-        re.findall(
-            r"^([A-Za-z_][\w-]*):\s*[\"']?(.*?)[\"']?\s*$", frontmatter, re.MULTILINE
-        )
-    )
+    fields: dict[str, str] = {}
+    for line_number, line in enumerate(frontmatter.splitlines(), start=2):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        field_match = re.fullmatch(r"([A-Za-z_][\w-]*)[ \t]*:[ \t]+(.*)", line)
+        if not field_match:
+            raise ConversionError(f"line {line_number}: unsupported YAML field")
+        key, value = field_match.groups()
+        if key in fields:
+            raise ConversionError(f"line {line_number}: duplicate field: {key}")
+        try:
+            fields[key] = scalar_text(value.rstrip())
+        except ConversionError as error:
+            raise ConversionError(f"line {line_number}: {key}: {error}") from None
 
     for field in ("name", "description"):
         if field not in fields:

@@ -44,12 +44,18 @@ is_harness() {
 # The directory where a harness reads its user-level configuration. Each one
 # honours that harness's own override variable.
 harness_dir() {
+    local dir
     case "$1" in
-        claude) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;;
-        codex) echo "${CODEX_HOME:-$HOME/.codex}" ;;
-        opencode) echo "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" ;;
-        pi) echo "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" ;;
+        claude) dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;;
+        codex) dir="${CODEX_HOME:-$HOME/.codex}" ;;
+        opencode) dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode" ;;
+        pi) dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" ;;
     esac
+    # A trailing slash hides a directory symlink from -L. Keep the root path.
+    while [[ "$dir" != / && "$dir" == */ ]]; do
+        dir="${dir%/}"
+    done
+    echo "$dir"
 }
 
 # The name under which a harness reads user/AGENTS.md. Claude Code reads its
@@ -186,10 +192,6 @@ generate_agents() {
     local extension="$3"
     local agent name target header content existing
     make_dir "$dir" || return 0
-    if ! command -v python3 >/dev/null; then
-        report "python3 not found; it is needed to write the $format subagents"
-        return 0
-    fi
     for agent in "$USER_DIR"/agents/*.md; do
         name="${agent##*/}"
         target="$dir/${name%.md}.$extension"
@@ -197,6 +199,10 @@ generate_agents() {
         if [[ (-e "$target" || -L "$target") && "$(generated_marker "$target")" != "$header" ]]; then
             report "$target: exists and was not generated from $agent"
             continue
+        fi
+        if ! command -v python3 >/dev/null; then
+            report "python3 not found; it is needed to write the $format subagents"
+            break
         fi
         if ! content="$(python3 "$HOUSE/tools/convert-agent.py" "$format" "$agent" "$header")"; then
             report "$agent: could not convert it for $format"
