@@ -76,6 +76,7 @@ check() {
 
 not() { ! "$@"; }
 links_to() { [[ -L "$1" && "$(readlink "$1")" == "$2" ]]; }
+path_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 status_is() { [[ "$status" == "$1" ]]; }
 err_says() { grep -q -- "$1" "$scratch/err"; }
 err_count_is() { [[ "$(grep -c -- "$2" "$scratch/err")" -eq "$1" ]]; }
@@ -156,7 +157,7 @@ check "a later run for all harnesses succeeds" status_is 0
 # other commands on PATH, using the same Bash as the rest of the tests.
 no_python_path="$scratch/no-python"
 mkdir "$no_python_path"
-for program in bash env dirname mkdir ln readlink head grep cat mktemp chmod mv rm; do
+for program in bash env dirname mkdir ln readlink head cat mktemp chmod mv rm; do
     ln -s "$(command -v "$program")" "$no_python_path/$program"
 done
 mv "$HOUSE/user/agents" "$scratch/source-agents"
@@ -223,6 +224,102 @@ run_install "$(new_home bad-sources-codex)" --harness codex
 check "a source that is not a subagent is reported for Codex alone" err_count_is 1 'notes.txt: not a subagent file'
 rmdir "$HOUSE/user/skills/not-a-skill"
 rm "$HOUSE/user/agents/notes.txt"
+
+# Missing or invalid source directories must not look like empty directories.
+for category in skills agents; do
+    source_dir="$HOUSE/user/$category"
+    mv "$source_dir" "$scratch/source-$category"
+    for condition in missing file dangling; do
+        case "$condition" in
+            file) touch "$source_dir" ;;
+            dangling) ln -s "$scratch/missing-directory" "$source_dir" ;;
+        esac
+        home="$(new_home "source-$category-$condition")"
+        run_install "$home" --harness claude
+        check "$condition source $category directory fails the run" status_is 1
+        check "$condition source $category directory is reported once" \
+            err_count_is 1 "user/$category: not a readable and searchable directory"
+        check "$condition source $category directory leaves instructions independent" \
+            links_to "$home/.claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
+        if [[ "$category" == skills ]]; then
+            check "invalid source skills leave agents independent" \
+                links_to "$home/.claude/agents/$probe_agent_name.md" "$probe_agent"
+        else
+            check "invalid source agents leave skills independent" \
+                links_to "$home/.claude/skills/$probe_skill_name" "$probe_skill"
+        fi
+        check "$condition source $category directory is not repaired" test ! -d "$source_dir"
+        [[ "$condition" == missing ]] || rm "$source_dir"
+    done
+    mv "$scratch/source-$category" "$source_dir"
+done
+
+# Instruction sources must resolve to readable regular files before linking.
+mv "$HOUSE/user/AGENTS.md" "$scratch/instructions.md"
+for condition in missing directory dangling fifo; do
+    case "$condition" in
+        directory) mkdir "$HOUSE/user/AGENTS.md" ;;
+        dangling) ln -s "$scratch/missing-instructions" "$HOUSE/user/AGENTS.md" ;;
+        fifo) mkfifo "$HOUSE/user/AGENTS.md" ;;
+    esac
+    home="$(new_home "instructions-$condition")"
+    run_install "$home"
+    check "$condition instruction source fails the run" status_is 1
+    check "$condition instruction source is reported once" \
+        err_count_is 1 'user/AGENTS.md: not a readable regular file'
+    for target in .claude/CLAUDE.md .codex/AGENTS.md .config/opencode/AGENTS.md .pi/agent/AGENTS.md; do
+        check "$condition instruction source creates no $target" path_absent "$home/$target"
+    done
+    check "$condition instruction source leaves skills independent" \
+        links_to "$home/.agents/skills/$probe_skill_name" "$probe_skill"
+    check "$condition instruction source leaves agents independent" \
+        test -f "$home/.codex/agents/$probe_agent_name.toml"
+    case "$condition" in
+        directory) rmdir "$HOUSE/user/AGENTS.md" ;;
+        dangling | fifo) rm "$HOUSE/user/AGENTS.md" ;;
+    esac
+done
+mv "$scratch/instructions.md" "$HOUSE/user/AGENTS.md"
+
+# A .md suffix does not make a directory, dangling link or FIFO an agent file.
+mkdir "$HOUSE/user/agents/directory.md"
+ln -s "$scratch/missing-agent" "$HOUSE/user/agents/dangling.md"
+mkfifo "$HOUSE/user/agents/fifo.md"
+home="$(new_home invalid-agent-types)"
+# Use linked harnesses: a converter must never be asked to read the FIFO.
+run_install "$home" --harness claude --harness pi
+check "invalid source agent types fail the run" status_is 1
+for name in directory dangling fifo; do
+    check "invalid source agent $name is reported once" \
+        err_count_is 1 "$name.md: not a readable regular file"
+    for dir in .claude .pi/agent; do
+        check "invalid source agent $name creates no link in $dir" \
+            path_absent "$home/$dir/agents/$name.md"
+    done
+done
+check "invalid source agents leave valid agents independent" \
+    links_to "$home/.claude/agents/$probe_agent_name.md" "$probe_agent"
+rmdir "$HOUSE/user/agents/directory.md"
+rm "$HOUSE/user/agents/dangling.md" "$HOUSE/user/agents/fifo.md"
+
+# Valid file symlinks remain valid sources for instructions and subagents.
+mv "$HOUSE/user/AGENTS.md" "$scratch/instructions.md"
+ln -s "$scratch/instructions.md" "$HOUSE/user/AGENTS.md"
+mv "$probe_agent" "$scratch/linked-agent.md"
+ln -s "$scratch/linked-agent.md" "$probe_agent"
+home="$(new_home linked-sources)"
+run_install "$home"
+check "readable source file symlinks succeed" status_is 0
+check "a source agent symlink is linked for Claude" \
+    links_to "$home/.claude/agents/$probe_agent_name.md" "$probe_agent"
+check "a source agent symlink is converted for Codex" \
+    test -f "$home/.codex/agents/$probe_agent_name.toml"
+run_install "$home"
+check "a second run with source file symlinks succeeds" status_is 0
+check "a second run with source file symlinks is silent" out_is_empty
+rm "$HOUSE/user/AGENTS.md" "$probe_agent"
+mv "$scratch/instructions.md" "$HOUSE/user/AGENTS.md"
+mv "$scratch/linked-agent.md" "$probe_agent"
 
 # Each unusual case is reported, and left as it was.
 home="$(new_home dangling)"
@@ -414,6 +511,106 @@ if [[ "$(id -u)" != 0 ]]; then
     check "an unreadable directory fails the run" status_is 1
     check "an unreadable directory is reported" err_says "agents: could not read it"
     check "an unreadable directory gets the summary" err_says "problem(s); nothing was removed"
+
+    # Read access and search access are separate requirements for source scans.
+    for category in skills agents; do
+        for mode in 100 400; do
+            home="$(new_home "source-$category-mode-$mode")"
+            chmod "$mode" "$HOUSE/user/$category"
+            run_install "$home" --harness claude
+            chmod 755 "$HOUSE/user/$category"
+            check "source $category mode $mode fails the run" status_is 1
+            check "source $category mode $mode is reported once" \
+                err_count_is 1 "user/$category: not a readable and searchable directory"
+            check "source $category mode $mode gets the summary" \
+                err_says 'problem(s); nothing was removed'
+            check "source $category mode $mode leaves instructions independent" \
+                links_to "$home/.claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
+        done
+    done
+
+    for source in "$HOUSE/user/AGENTS.md" "$probe_agent" "$probe_skill/SKILL.md"; do
+        home="$(new_home "unreadable-source-${source##*/}")"
+        chmod 000 "$source"
+        run_install "$home" --harness claude --harness pi
+        chmod 644 "$source"
+        check "unreadable source ${source##*/} fails the run" status_is 1
+        check "unreadable source ${source##*/} is reported once" \
+            err_count_is 1 "$source: not a readable regular file"
+        check "unreadable source ${source##*/} gets the summary" \
+            err_says 'problem(s); nothing was removed'
+        case "$source" in
+            "$HOUSE/user/AGENTS.md")
+                check "unreadable instructions create no link" path_absent "$home/.claude/CLAUDE.md"
+                check "unreadable instructions leave agents independent" \
+                    links_to "$home/.claude/agents/$probe_agent_name.md" "$probe_agent"
+                ;;
+            "$probe_agent")
+                check "an unreadable source agent creates no link" \
+                    path_absent "$home/.claude/agents/$probe_agent_name.md"
+                check "an unreadable source agent leaves skills independent" \
+                    links_to "$home/.claude/skills/$probe_skill_name" "$probe_skill"
+                ;;
+            *)
+                check "an unreadable skill creates no link" \
+                    path_absent "$home/.claude/skills/$probe_skill_name"
+                check "an unreadable skill leaves agents independent" \
+                    links_to "$home/.claude/agents/$probe_agent_name.md" "$probe_agent"
+                ;;
+        esac
+    done
+
+    # A failed header read is an error, even with no source agents or Python.
+    mv "$HOUSE/user/agents" "$scratch/source-agents"
+    mkdir "$HOUSE/user/agents"
+    home="$(new_home unreadable-generated)"
+    mkdir -p "$home/.codex/agents" "$home/.config/opencode/agents"
+    echo "$gone_header" >"$scratch/before-stale"
+    for target in "$home/.codex/agents/gone.toml" "$home/.config/opencode/agents/gone.md"; do
+        echo "$gone_header" >"$target"
+        chmod 000 "$target"
+    done
+    PATH="$no_python_path" run_install "$home" --harness codex --harness opencode
+    check "unreadable generated files without sources or Python fail the run" status_is 1
+    check "both unreadable generated files are reported" \
+        err_count_is 2 'gone.*: could not read its generated-file comment'
+    check "header-read failures get the summary" err_says 'problem(s); nothing was removed'
+    for target in "$home/.codex/agents/gone.toml" "$home/.config/opencode/agents/gone.md"; do
+        echo "$gone_header" >"${target%/*}/readable.${target##*.}"
+        touch "${target%/*}/.agent-house.leftover"
+    done
+    PATH="$no_python_path" run_install "$home" --harness codex --harness opencode
+    check "other stale generated files are still checked" err_count_is 2 'readable.*: generated from'
+    check "temporary files are still checked after header-read failures" \
+        err_count_is 2 'a temporary file from an earlier run'
+    for target in "$home/.codex/agents/gone.toml" "$home/.config/opencode/agents/gone.md"; do
+        check "an unreadable generated file stays unreadable" test ! -r "$target"
+        chmod 644 "$target"
+        check "an unreadable generated file keeps its contents" \
+            cmp -s "$target" "$scratch/before-stale"
+    done
+    rmdir "$HOUSE/user/agents"
+    mv "$scratch/source-agents" "$HOUSE/user/agents"
+
+    # The ownership check before rewriting must also handle a failed read.
+    home="$(new_home unreadable-active-generated)"
+    run_install "$home" --harness codex --harness opencode
+    check "the setup for unreadable active generated files succeeds" status_is 0
+    for target in "$home/.codex/agents/$probe_agent_name.toml" "$home/.config/opencode/agents/$probe_agent_name.md"; do
+        cp "$target" "$scratch/before.${target##*.}"
+        chmod 000 "$target"
+    done
+    run_install "$home" --harness codex --harness opencode
+    check "unreadable active generated files fail the run" status_is 1
+    check "unreadable active generated files get a read error" err_says 'could not read its generated-file comment'
+    check "unreadable active generated files leave skills independent" \
+        links_to "$home/.agents/skills/$probe_skill_name" "$probe_skill"
+    for target in "$home/.codex/agents/$probe_agent_name.toml" "$home/.config/opencode/agents/$probe_agent_name.md"; do
+        check "an unreadable active generated file stays unreadable" test ! -r "$target"
+        chmod 644 "$target"
+        check "an unreadable active generated file keeps its contents" \
+            cmp -s "$target" "$scratch/before.${target##*.}"
+    done
 fi
 
 # The subagent converter's translation of Claude Code's tool lists.

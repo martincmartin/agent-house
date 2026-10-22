@@ -66,6 +66,21 @@ instructions_name() {
     esac
 }
 
+# Validate sources without creating them. Empty source directories are valid.
+check_source_dir() {
+    if [[ ! -d "$1" || ! -r "$1" || ! -x "$1" ]]; then
+        report "$1: not a readable and searchable directory"
+        return 1
+    fi
+}
+
+check_source_file() {
+    if [[ ! -f "$1" || ! -r "$1" ]]; then
+        report "$1: not a readable regular file"
+        return 1
+    fi
+}
+
 # Make a directory that install writes into, and report its dangling links.
 # It must be a directory of its own, not a link. Its parents can be links.
 # Returns 1, after a report, when the directory cannot be used: then the
@@ -162,14 +177,19 @@ link_each() {
 
 # The source subagent that the generated-file comment in the first two lines
 # of the file $1 names, if it has one. Only a regular file can be one that
-# install generated, so only one is read.
+# install generated, so only one is read. Return 1 if its header cannot be read.
 generated_source() {
-    local line
+    local header line
     [[ -f "$1" && ! -L "$1" ]] || return 0
-    line="$(head -n 2 "$1" | grep -F -- "$GENERATED_PREFIX" | head -n 1 || true)"
-    [[ "$line" == "$GENERATED_PREFIX"*"$GENERATED_SUFFIX" ]] || return 0
-    line="${line#"$GENERATED_PREFIX"}"
-    echo "${line%"$GENERATED_SUFFIX"}"
+    header="$(head -n 2 "$1" 2>/dev/null)" || return 1
+    while IFS= read -r line; do
+        if [[ "$line" == "$GENERATED_PREFIX"*"$GENERATED_SUFFIX" ]]; then
+            line="${line#"$GENERATED_PREFIX"}"
+            echo "${line%"$GENERATED_SUFFIX"}"
+            return 0
+        fi
+    done <<<"$header"
+    return 0
 }
 
 # Codex and OpenCode cannot read Claude Code's subagent format, so install
@@ -181,7 +201,7 @@ generate_agents() {
     local format="$2"
     local extension="$3"
     local python=yes
-    local agent name target content existing
+    local agent name target content existing existing_source
     shift 3
     prepare_dir "$dir" || return 0
     # Python is needed only when there is a subagent to convert.
@@ -192,9 +212,15 @@ generate_agents() {
     for agent in "$@"; do
         name="${agent##*/}"
         target="$dir/${name%.md}.$extension"
-        if [[ (-e "$target" || -L "$target") && "$(generated_source "$target")" != "$agent" ]]; then
-            report "$target: exists and was not generated from $agent"
-            continue
+        if [[ -e "$target" || -L "$target" ]]; then
+            if ! existing_source="$(generated_source "$target")"; then
+                report "$target: could not read its generated-file comment"
+                continue
+            fi
+            if [[ "$existing_source" != "$agent" ]]; then
+                report "$target: exists and was not generated from $agent"
+                continue
+            fi
         fi
         [[ -n "$python" ]] || continue
         if ! content="$(python3 "$HOUSE/tools/convert-agent.py" "$format" "$agent" \
@@ -217,22 +243,28 @@ generate_agents() {
     done
     # A generated file whose source is gone.
     for target in "$dir"/*."$extension"; do
-        agent="$(generated_source "$target")"
+        if ! agent="$(generated_source "$target")"; then
+            report "$target: could not read its generated-file comment"
+            continue
+        fi
         if [[ "$agent" == "$USER_DIR/agents/"* && ! -e "$agent" ]]; then
             report "$target: generated from $agent, which no longer exists"
         fi
     done
 }
 
-# Everything that goes in the harness's own directory. The shared skills do
-# not: they are installed once, after the harnesses.
+# Everything that goes in the harness's own directory. $2 is the validated
+# instruction source, or empty to skip it. Shared skills are installed later.
 install_harness() {
     local harness="$1"
+    local instructions_source="$2"
     local dir
     dir="$(harness_dir "$harness")"
     prepare_dir "$dir" || return 0
 
-    make_link "$USER_DIR/AGENTS.md" "$dir/$(instructions_name "$harness")"
+    if [[ -n "$instructions_source" ]]; then
+        make_link "$instructions_source" "$dir/$(instructions_name "$harness")"
+    fi
     case "$harness" in
         codex) generate_agents "$dir" codex toml ${agents[@]+"${agents[@]}"} ;;
         opencode) generate_agents "$dir" opencode md ${agents[@]+"${agents[@]}"} ;;
@@ -266,28 +298,36 @@ while [[ $# -gt 0 ]]; do
 done
 
 # The sources in user/, each checked once, before the harnesses that use them.
+instructions_source=""
+if check_source_file "$USER_DIR/AGENTS.md"; then
+    instructions_source="$USER_DIR/AGENTS.md"
+fi
 skills=()
-for source in "$USER_DIR"/skills/*; do
-    [[ "$source" == *~ ]] && continue
-    if [[ -f "$source/SKILL.md" ]]; then
-        skills+=("$source")
-    else
-        report "$source: not a skill directory (no SKILL.md)"
-    fi
-done
+if check_source_dir "$USER_DIR/skills"; then
+    for source in "$USER_DIR"/skills/*; do
+        [[ "$source" == *~ ]] && continue
+        if [[ ! -f "$source/SKILL.md" ]]; then
+            report "$source: not a skill directory (no SKILL.md)"
+        elif check_source_file "$source/SKILL.md"; then
+            skills+=("$source")
+        fi
+    done
+fi
 agents=()
-for source in "$USER_DIR"/agents/*; do
-    [[ "$source" == *~ ]] && continue
-    if [[ "$source" == *.md ]]; then
-        agents+=("$source")
-    else
-        report "$source: not a subagent file (*.md)"
-    fi
-done
+if check_source_dir "$USER_DIR/agents"; then
+    for source in "$USER_DIR"/agents/*; do
+        [[ "$source" == *~ ]] && continue
+        if [[ "$source" != *.md ]]; then
+            report "$source: not a subagent file (*.md)"
+        elif check_source_file "$source"; then
+            agents+=("$source")
+        fi
+    done
+fi
 
 shared_skills=""
 for harness in ${harnesses:-$ALL_HARNESSES}; do
-    install_harness "$harness"
+    install_harness "$harness" "$instructions_source"
     [[ "$harness" == claude ]] || shared_skills=yes
 done
 if [[ -n "$shared_skills" ]]; then

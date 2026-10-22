@@ -1,7 +1,7 @@
 # Where each harness reads its user-level configuration
 
-**Covers:** the directory, instruction file, skills and subagents that `install`
-sets up for each harness, and the facts that decided each one.
+**Covers:** each harness's configuration paths, the source and generated-file
+checks in `install`, and the facts behind these rules.
 **Read before** you change `install` or `tools/convert-agent.py`, add a harness,
 move a link, or add a subagent key.
 
@@ -24,6 +24,14 @@ write their own files there (Codex `skills/.system/`, Claude Code
 Each directory that `install` writes into must be a directory of its own.
 Its parents can be links. Trailing slashes on a harness directory do not change
 this check; `/` stays `/`.
+
+Before it installs configuration, `install` checks its sources once.
+The `user/skills/` and `user/agents/` directories must allow reading and
+searching. Empty directories are valid. The instruction file, each agent file,
+and each skill's `SKILL.md` must resolve to readable regular files.
+Source files can be links. If a source check fails, `install` reports it,
+skips what depends on that source, and exits with status 1.
+It continues with independent configuration and does not repair sources.
 
 ## Skills: one shared directory, and Claude Code's own
 
@@ -62,6 +70,8 @@ subagents. `install` links them for Claude Code and Pi, and
 `tools/convert-agent.py` writes them for Codex and OpenCode. A comment in the
 first two lines of a generated file names its source. `install` reports a file
 with that name that it did not write, or whose source is gone, and leaves it.
+If it cannot read a generated-file comment, it reports the failed check,
+leaves the file unchanged, checks the other entries, and exits with status 1.
 
 Conversion reads only flat fields, each with a single-line string: plain,
 single-quoted (two single quotes for one quote), or double-quoted without
