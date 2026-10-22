@@ -105,6 +105,11 @@ it.
 - **Do not bind `:class` on an element that has `v-click`.** When the binding
   changes, Vue rewrites the element's classes and removes the `v-click` ones,
   with no error.
+- **Put no comment before or after a component's root element.** In a
+  production build the comment makes a second root, and the `class` and
+  `v-click` that a slide gives the component are dropped, with no error.
+  `slidev dev` hides this: only a build shows it. Put the comment inside the
+  root element.
 
 ### Slide classes and styles
 
