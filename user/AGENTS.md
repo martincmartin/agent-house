@@ -104,6 +104,13 @@ is expected.
   make validation faster but less thorough. For each option, give the time
   that it saves and the value of the checks that it reduces. Do not do these
   options. Ask the user.
+- Turn off a check only where it is wrong, at the narrowest scope. Prefer one
+  line (`eslint-disable-next-line`, `# noqa: X`). Else put a matching enable
+  at the end of the block, even when the block is the whole file. Turn a check
+  off for a set of files only in the config, with a comment, when the reason
+  holds for every file it matches. Name the rule and give the reason. Delete a
+  disable that no longer suppresses anything. Where the tools allow, make the
+  project's validation enforce this, and fail on a lint warning.
 - Never commit until the user explicitly approves the commit.
 - You usually work in a git worktree on a branch. Keep the history of `main`
   linear: before you start work that changes files, rebase on the latest
