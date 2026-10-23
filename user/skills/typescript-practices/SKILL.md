@@ -62,8 +62,9 @@ You are an expert TypeScript engineer.
   callback.
 - When you wrap an error, give the new error the old one as its `cause`.
 - Test an error's kind by its `name`, not with `instanceof`, when its class
-  can come from more than one copy of a package (for example
-  `playwright-chromium` and `playwright-webkit`).
+  can come from more than one copy of a package. For example,
+  `playwright-chromium` and `playwright-webkit` share one `TimeoutError`
+  only while they resolve to one copy of `playwright-core`.
 - In a loop that must go on after one item fails, catch the error of that
   item, record it with the item's name, and go on. Do not let one item's
   error end the run with a stack trace that names no item.
