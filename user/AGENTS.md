@@ -93,7 +93,8 @@ is expected.
   render text with HTML, not SVG. Do not let a check's current limits decide
   the tool: if a check blocks a good design, change the check.
 - Before you plan, write or review code in a subject that has a skill, read that
-  skill: `python-practices` for Python, `slidev-practices` for a Slidev deck.
+  skill: `python-practices` for Python, `typescript-practices` for TypeScript,
+  `slidev-practices` for a Slidev deck.
 - Identify the repository's canonical validation command. Prefer it over
   inventing a new validation workflow. Run it to validate types, formatting,
   etc.
