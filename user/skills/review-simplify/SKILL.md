@@ -12,7 +12,8 @@ code of doubtful benefit, that could go, so that the code as a whole is easier
 for someone new to understand and maintain?
 
 Read the `review-general` skill, and follow its sections "Who reviews", "What
-to review", "Working rules", "Findings", "The report" and "Save the report".
+to review", "Working rules", "Findings", "The report" and "Keep the report out
+of the repository".
 In place of its "The general review", do the review below. Report a
 correctness defect that you find on the way, as the general review would.
 

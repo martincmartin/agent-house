@@ -13,7 +13,8 @@ serious that it finds. There is no lane that leaves a subject to another
 reviewer: there are none.
 
 "Who reviews", "What to review", "Working rules", "Findings", "The report" and
-"Save the report" are shared: the simplicity review follows them too.
+"Keep the report out of the repository" are shared: the simplicity review
+follows them too.
 
 ## Who reviews
 
@@ -23,7 +24,7 @@ undocumented assumptions of whoever made the change.
 - **This session made the changes** (it wrote, edited or planned them): start
   a general-purpose subagent, so that the review has a clean context. Give it
   everything in "What to review", and tell it which review skill to read and
-  follow. It returns the report, and you save it. Pi has no subagents: there,
+  follow. It returns the report, and you keep it. Pi has no subagents: there,
   suggest that the user starts a new session for the review.
 - **This session did not make the changes** (the user started it for the
   review, perhaps in another harness): review here, yourself. There is no
@@ -39,9 +40,9 @@ The reviewer must know three things:
   - a commit range, or a branch against a base that you are given. Never guess
     the base from a branch name;
   - the uncommitted changes: staged, unstaged and new files;
-  - the changes since the last review of the same kind: the last report in
-    TASK_DIR, or at the project root, records the scope that it covered.
-    Review from there to now, and check whether its findings were addressed;
+  - the changes since the last review of the same kind: from the last
+    commit that it reviewed to now. The user or the session that ran it gives
+    that commit, and its findings. Check whether they were addressed;
   - named files or modules, for a review of existing code.
 - **Each repository or worktree**, by its absolute path. A change can span
   more than one.
@@ -146,16 +147,16 @@ A complete Markdown report, with:
 6. **Limits:** what you checked only by reading, which checks you ran and
    their results, and what you could not check.
 
-## Save the report
+## Keep the report out of the repository
 
-- Save the complete report word for word, named after the review's skill and
-  the date: `review-general-YYYY-MM-DD.md` or `review-simplify-YYYY-MM-DD.md`.
-  Save it in TASK_DIR if there is one, else at the root of the project that is
-  the review's main topic. If a file with that name exists, add an upper-case
-  letter, not a number, which would read as part of the date:
-  `review-general-YYYY-MM-DD-B.md`, then `-C`, and so on. Never overwrite a
-  review. Never save one in a directory whose files reach the harnesses, such
-  as agent-house's `user/`.
+- Never commit a review report. Keep the complete report, word for word, in a
+  file outside the repository, such as the harness's scratch directory, named
+  after the review's skill and the date: `review-general-YYYY-MM-DD.md` or
+  `review-simplify-YYYY-MM-DD.md`. Never overwrite a report: if the name is
+  taken, add an upper-case letter, not a number, which would read as part of
+  the date: `review-general-YYYY-MM-DD-B.md`, then `-C`, and so on.
+- Tell the user where the report is, and its findings.
+- After you have made the fixes that you decide on, delete the report. What
+  the review changed is in the code, the docs and the commit messages.
 - If a subagent returned "REVIEW BLOCKED", resolve what it names and start it
   again.
-- Tell the user where you saved the report.
