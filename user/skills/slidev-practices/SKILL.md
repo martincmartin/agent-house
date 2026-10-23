@@ -133,6 +133,10 @@ it.
   theme and the headmatter.
 - **Slidev merges each addon's `index.html` into the page,** so an addon can put
   a class on `<html>` with no JavaScript.
+- **The dev server sends the deck's `index.html` without Vite's changes.**
+  `%BASE_URL%` and other `%…%` values are replaced only in a build. For a file
+  in `public/`, write its absolute path (`/favicon.ico`): a build puts the base
+  before it.
 
 ### Scaling
 
