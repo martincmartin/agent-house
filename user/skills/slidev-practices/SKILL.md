@@ -1,20 +1,28 @@
 ---
 name: slidev-practices
 description: >
-  Practices for every Slidev deck; for now, the traps that fail silently, and
-  how to check for them. Read before you plan, write or review a deck: before
-  you edit slides.md or pages/*.md, a layout, global-top.vue or
-  global-bottom.vue, a Slidev addon or theme, or the headmatter, and before you
-  export, print or build a deck. Covers: offline and private-window browsers,
-  fonts, one exported page per click, v-click classes, going back a click or a
-  slide, slide classes and .slidev-layout, CSS-transform scaling, speaker
-  notes, routes, Slidev internals, Prettier and pnpm.
+  Practices for every Slidev deck: the language for scripts, and the traps that
+  fail silently and how to check for them. Read before you plan, write or
+  review a deck: before you edit slides.md or pages/*.md, a layout,
+  global-top.vue or global-bottom.vue, a Slidev addon or theme, or the
+  headmatter, before you export, print or build a deck, and before you add a
+  script or a test. Covers: offline and private-window browsers, fonts, one
+  exported page per click, v-click classes, going back a click or a slide,
+  slide classes and .slidev-layout, CSS-transform scaling, speaker notes,
+  routes, Slidev internals, Prettier and pnpm.
 ---
 
 # Slidev practices
 
 Practices for every Slidev project, when you plan, write or review a deck. A
 project's own docs can add house rules on top of these.
+
+## Language for scripts
+
+- Write tests, checks and scripts in TypeScript, unless another language fits
+  the job clearly better (SciPy for optimisation, R for statistics). It can
+  import the deck's own code, and it shares the deck's toolchain.
+- Do not rewrite a working script only to follow this rule.
 
 ## Traps that fail silently
 
