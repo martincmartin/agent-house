@@ -14,6 +14,11 @@ Before you…
 
 ## Rules
 
+- **Do not edit or commit in the checkout that `install` linked** (on a
+  laptop, `~/Develop/agent-house/main`). Every harness reads its files, so a
+  change there is live at once, also a change that is not finished. Work in a
+  worktree on a branch, run `tools/check`, and then fast-forward `main` in that
+  checkout.
 - **Everything in `user/` reaches all four harnesses:** Claude Code, Codex,
   OpenCode and Pi. Keep it neutral. If a rule or a skill is true for one
   harness only, say so in the text.
