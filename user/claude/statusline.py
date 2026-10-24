@@ -1,8 +1,9 @@
-"""Claude Code status line, one line.
+"""Claude Code status line.
 
-Model, effort, (git branch), session cost, context tokens, prompt cache (time
-until cold, misses, tokens that a cold cache re-sends), and the 5-hour and
-7-day rate limits, each with its pace and the time until it resets.
+The first line: model, effort, (git branch), session cost, context tokens,
+prompt cache (time until cold, misses, tokens that a cold cache re-sends), and
+the 5-hour and 7-day rate limits, each with its pace and the time until it
+resets. The second line: a bar under each rate limit, in eighths of a cell.
 
 Claude Code sends the session's data as JSON on stdin
 (https://code.claude.com/docs/en/statusline). A field that is absent is left
@@ -33,6 +34,10 @@ MAGENTA = "\033[0;35m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
 RED = "\033[1;31m"
+# The background of a bar's empty part: the terminal's bright black.
+TRACK = "\033[100m"
+# 1/8 to 7/8 of a cell, filled from the left.
+EIGHTHS = "▏▎▍▌▋▊▉"
 
 FIVE_HOURS = 5 * 3600
 SEVEN_DAYS = 7 * 86400
@@ -50,9 +55,34 @@ class Config:
     # Seconds: in its last seconds, the prompt cache turns yellow and shows
     # the tokens that the next request re-sends if it goes cold.
     cache_warning: int = 300
+    # Cells: the width of a rate limit's bar. Each cell has 8 steps.
+    bar_width: int = 10
 
 
 DEFAULT_CONFIG = Config()
+
+
+@dataclass(frozen=True)
+class Span:
+    """Text in one style: an SGR escape, or "" for none. Each character that
+    the status line uses is one terminal cell wide, so a span's width is its
+    length."""
+
+    text: str
+    style: str = ""
+
+
+SEPARATOR = Span(" · ", DIM)
+
+
+def render(spans: list[Span]) -> str:
+    return "".join(
+        f"{span.style}{span.text}{RESET}" if span.style else span.text for span in spans
+    )
+
+
+def width(spans: list[Span]) -> int:
+    return sum(len(span.text) for span in spans)
 
 
 @dataclass(frozen=True)
@@ -161,37 +191,50 @@ def until(moment: int, now: int) -> str:
     return f"{minutes}m"
 
 
-def window(name: str, length: int, limit: RateWindow, now: int, config: Config) -> str:
+def window(
+    name: str, length: int, limit: RateWindow, now: int, config: Config
+) -> list[Span]:
     """A rate-limit window: "5h 64%▲ ↻2h05m". ▲ marks a use ahead of the time
     that has passed in the window, which runs out before it resets."""
     used = round(limit.used_percentage)
-    text = f"{name} {colour_of(used, 100)}{used}%{RESET}"
+    spans = [Span(f"{name} "), Span(f"{used}%", colour_of(used, 100))]
     if limit.resets_at is None:
-        return text
+        return spans
     passed = 100 - max(limit.resets_at - now, 0) * 100 // length
     if used > config.pace_min_used and used > passed:
-        text += f"{RED}▲{RESET}"
-    return text + f" {DIM}↻{until(limit.resets_at, now)}{RESET}"
+        spans.append(Span("▲", RED))
+    return [*spans, Span(" "), Span(f"↻{until(limit.resets_at, now)}", DIM)]
 
 
-def cache_part(cache: PromptCache, now: int, config: Config) -> str:
+def bar(limit: RateWindow, config: Config) -> Span:
+    """A bar of `config.bar_width` cells, filled to the window's use, in
+    eighths of a cell."""
+    fraction = min(max(limit.used_percentage / 100, 0.0), 1.0)
+    full, rest = divmod(round(fraction * config.bar_width * 8), 8)
+    text = "█" * full + (EIGHTHS[rest - 1] if rest else "")
+    colour = colour_of(round(limit.used_percentage), 100)
+    return Span(text.ljust(config.bar_width), colour + TRACK)
+
+
+def cache_part(cache: PromptCache, now: int, config: Config) -> list[Span]:
     """The time until the cache goes cold, yellow in its last minutes, or
     "cold". In its last minutes, or when cold, the tokens that the next
     request re-sends. Then its misses, with the last one's cause."""
+    spans = [Span("cache ")]
     if cache.warm and cache.expires_at is not None and cache.expires_at > now:
         left = cache.expires_at - now
         colour = YELLOW if left < config.cache_warning else GREEN
-        text = f"cache {colour}{until(cache.expires_at, now)}{RESET}"
+        spans.append(Span(until(cache.expires_at, now), colour))
     else:
         left = 0
-        text = f"cache {RED}cold{RESET}"
+        spans.append(Span("cold", RED))
     if cache.recache_tokens_if_cold is not None and left < config.cache_warning:
-        text += f" {DIM}({tokens(cache.recache_tokens_if_cold)}){RESET}"
+        spans += [Span(" "), Span(f"({tokens(cache.recache_tokens_if_cold)})", DIM)]
     if cache.misses:
-        text += f" {YELLOW}✗{cache.misses}{RESET}"
+        spans += [Span(" "), Span(f"✗{cache.misses}", YELLOW)]
         if cache.miss_causes:
-            text += f" {DIM}{','.join(cache.miss_causes)}{RESET}"
-    return text
+            spans += [Span(" "), Span(",".join(cache.miss_causes), DIM)]
+    return spans
 
 
 def compact_window(settings: dict[str, Any], model_id: str) -> int | None:
@@ -211,29 +254,46 @@ def status_line(
     now: int,
     config: Config = DEFAULT_CONFIG,
 ) -> str:
-    head = f"{CYAN}{session.model}{RESET}"
+    """The first line, and when there are rate limits, a second line with a
+    bar under each one."""
+    head = [Span(session.model, CYAN)]
     if session.effort:
-        head += f" {MAGENTA}{session.effort}{RESET}"
+        head += [Span(" "), Span(session.effort, MAGENTA)]
     if branch:
-        head += f" {RED}({branch}){RESET}"
+        head += [Span(" "), Span(f"({branch})", RED)]
     parts = [head]
     if session.cost_usd is not None:
-        parts.append(f"${session.cost_usd:.2f}")
+        parts.append([Span(f"${session.cost_usd:.2f}")])
     if session.context_tokens is not None:
         # Coloured against the auto-compact window, else the context window.
         limit = compact_limit or session.context_window_size
         colour = colour_of(session.context_tokens, limit) if limit else ""
-        end = RESET if limit else ""
-        parts.append(f"ctx {colour}{tokens(session.context_tokens)}{end}")
+        parts.append([Span("ctx "), Span(tokens(session.context_tokens), colour)])
     elif session.context_window_size is not None:
-        parts.append(f"ctx {DIM}?{RESET}")
+        parts.append([Span("ctx "), Span("?", DIM)])
     if session.cache is not None:
         parts.append(cache_part(session.cache, now, config))
-    if session.five_hour is not None:
-        parts.append(window("5h", FIVE_HOURS, session.five_hour, now, config))
-    if session.seven_day is not None:
-        parts.append(window("7d", SEVEN_DAYS, session.seven_day, now, config))
-    return f" {DIM}·{RESET} ".join(parts)
+    # Each bar starts in the column of its window, which is padded to the
+    # bar's width, so that the next bar does not overlap it.
+    bars: list[Span] = []
+    for name, length, rate_limit in (
+        ("5h", FIVE_HOURS, session.five_hour),
+        ("7d", SEVEN_DAYS, session.seven_day),
+    ):
+        if rate_limit is None:
+            continue
+        column = sum(width(part) + len(SEPARATOR.text) for part in parts)
+        bars += [Span(" " * (column - width(bars))), bar(rate_limit, config)]
+        part = window(name, length, rate_limit, now, config)
+        parts.append([*part, Span(" " * (config.bar_width - width(part)))])
+    first = render(
+        [
+            span
+            for index, part in enumerate(parts)
+            for span in ([SEPARATOR] if index else []) + part
+        ]
+    )
+    return f"{first.rstrip()}\n{render(bars)}" if bars else first.rstrip()
 
 
 def git_branch(directory: str | None) -> str | None:

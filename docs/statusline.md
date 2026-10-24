@@ -8,10 +8,11 @@ is tested, and the facts about Claude Code's input that it depends on.
 
 ## What it shows
 
-One line, for example:
+Two lines, for example:
 
 ```text
 Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m · 7d 84%▲ ↻3d4h
+                                                      ██████▍           ████████▍
 ```
 
 - **The model, its effort and the git branch** of the working directory.
@@ -26,9 +27,14 @@ Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m · 
 - **The 5-hour and 7-day rate limits:** the percentage used, and the time until
   each resets. `▲` means that the use is ahead of the part of the window that
   has passed, and above a floor, so that the window runs out before it resets.
+- **A bar under each rate limit,** in the colour of its percentage, on a
+  bright black track. It fills in eighths of a cell, with Unicode's left
+  eighth blocks (`▏` to `▉`), the finest step of a bar in plain text. A
+  window's text is padded to the bar's width, so that two bars do not overlap.
+  Without rate limits, there is no second line.
 
 `Config` in `statusline.py` holds the numbers that you can tune: the pace
-floor, and when the cache turns yellow.
+floor, when the cache turns yellow, and the width of a bar.
 
 ## Turn it on
 

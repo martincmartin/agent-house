@@ -8,10 +8,13 @@ import unittest
 from typing import Any
 
 from statusline import (
+    DEFAULT_CONFIG,
     GREEN,
     RED,
     YELLOW,
+    RateWindow,
     Session,
+    bar,
     compact_window,
     status_line,
     tokens,
@@ -40,8 +43,13 @@ def line(
 def plain(
     data: dict[str, Any], branch: str | None = None, compact_limit: int | None = None
 ) -> str:
-    """The status line for the input `data`, without colours."""
-    return ESCAPE.sub("", line(data, branch, compact_limit))
+    """The status line's first line for the input `data`, without colours."""
+    return ESCAPE.sub("", line(data, branch, compact_limit)).split("\n")[0]
+
+
+def bars(data: dict[str, Any]) -> str:
+    """The status line's second line, the bars, without colours."""
+    return ESCAPE.sub("", line(data)).split("\n")[1]
 
 
 def context(total: int, size: int | None = 1_000_000) -> dict[str, Any]:
@@ -99,7 +107,7 @@ class StatusLineTest(unittest.TestCase):
 
     def test_context_without_a_size_has_no_colour(self) -> None:
         data = {"model": OPUS, "context_window": context(1499, size=None)}
-        self.assertEqual(line(data).split(" ctx ")[1], "1k")
+        self.assertTrue(line(data).endswith("ctx 1k"))
 
     def test_cache_late_shows_recache_and_misses(self) -> None:
         cache = {
@@ -163,6 +171,49 @@ class StatusLineTest(unittest.TestCase):
         self.assertEqual(
             plain({"model": OPUS, "rate_limits": limits}), "Opus 5.5 · 5h 64%"
         )
+
+
+class BarTest(unittest.TestCase):
+    def test_each_bar_is_under_its_window(self) -> None:
+        data = {"model": OPUS, "rate_limits": RATE_LIMITS}
+        first, second = plain(data), bars(data)
+        five_hour, seven_day = first.index("5h"), first.index("7d")
+        # 63.5% of 80 eighths is 51: 6 cells and 3 eighths.
+        self.assertEqual(second[five_hour : five_hour + 10], "██████▍   ")
+        # 84.2% of 80 eighths is 67: 8 cells and 3 eighths.
+        self.assertEqual(second[seven_day:], "████████▍ ")
+        self.assertEqual(second[:five_hour], " " * five_hour)
+
+    def test_a_short_window_is_padded_so_that_bars_do_not_overlap(self) -> None:
+        limits = {
+            "five_hour": {"used_percentage": 64.5},
+            "seven_day": {"used_percentage": 10},
+        }
+        data = {"model": OPUS, "rate_limits": limits}
+        first, second = plain(data), bars(data)
+        self.assertEqual(first, "Opus 5.5 · 5h 64%     · 7d 10%")
+        self.assertEqual(second.index("█"), first.index("5h"))
+        self.assertEqual(second.rindex("█"), first.index("7d"))
+
+    def test_no_rate_limits_no_second_line(self) -> None:
+        self.assertNotIn("\n", line({"model": OPUS, "context_window": context(1)}))
+
+    def test_eighths(self) -> None:
+        cases = {
+            0: " " * 10,
+            1: "▏" + " " * 9,
+            50: "█████     ",
+            100: "█" * 10,
+            120: "█" * 10,
+        }
+        for used, expected in cases.items():
+            with self.subTest(used=used):
+                limit = RateWindow(used_percentage=used, resets_at=None)
+                self.assertEqual(bar(limit, DEFAULT_CONFIG).text, expected)
+
+    def test_colour_follows_use(self) -> None:
+        limit = RateWindow(used_percentage=84.2, resets_at=None)
+        self.assertTrue(bar(limit, DEFAULT_CONFIG).style.startswith(RED))
 
 
 class FormatTest(unittest.TestCase):
