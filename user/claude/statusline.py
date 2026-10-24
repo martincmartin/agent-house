@@ -4,7 +4,8 @@ On the left, a column for each gauge, with its text over a bar in eighths of a
 cell: the prompt cache (time until cold, the tokens that a cold cache writes
 again, and the session's misses), the context's tokens, and the 5-hour and
 7-day rate limits, each with its pace and the time until it resets. On the
-right: the model, its effort and the git branch, over the session's cost.
+right: the model, its effort and the git branch, over the session's cost and
+what it was spent on, summed from the transcripts at list prices.
 
 Claude Code sends the session's data as JSON on stdin
 (https://code.claude.com/docs/en/statusline). A field that is absent is left
@@ -24,6 +25,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,29 @@ SHORT_CAUSES = {
     "ttl_expired_1h": "ttl1h",
     "likely_server_side": "server",
 }
+
+
+@dataclass(frozen=True)
+class Prices:
+    """A model's list prices, in USD for a million tokens. A cache write
+    costs 1.25 times the input price for the 5-minute lifetime, and 2 times
+    for the 1-hour one."""
+
+    input: float
+    output: float
+    cache_read: float
+
+
+# From Anthropic's price list (the claude-api skill's table of 2026-10-06).
+# A response from a model that is not here, or in fast mode, is not split:
+# its cost shows as "other".
+PRICES = {
+    "claude-fable-5-1": Prices(input=10.00, output=50.00, cache_read=0.25),
+    "claude-opus-5-5": Prices(input=4.00, output=20.00, cache_read=0.20),
+    "claude-sonnet-5-5": Prices(input=2.00, output=10.00, cache_read=0.20),
+}
+WRITE_5M = 1.25
+WRITE_1H = 2.0
 
 
 @dataclass(frozen=True)
@@ -178,6 +203,8 @@ class PromptCache:
     ttl: int | None
     misses: int | None
     miss_causes: list[str]
+    # Tokens written to the cache again by the requests counted as misses.
+    miss_recache_tokens: int | None
     recache_tokens_if_cold: int | None
 
 
@@ -189,6 +216,7 @@ class Session:
     model_id: str
     effort: str | None
     directory: str | None
+    transcript: Path | None
     cost_usd: float | None
     # None while Claude Code does not know the count.
     context_tokens: int | None
@@ -211,6 +239,9 @@ class Session:
             model_id=model.get("id") or "",
             effort=effort.get("level"),
             directory=workspace.get("current_dir") or data.get("cwd"),
+            transcript=Path(data["transcript_path"])
+            if data.get("transcript_path")
+            else None,
             cost_usd=cost.get("total_cost_usd"),
             context_tokens=(
                 context.get("total_input_tokens")
@@ -234,6 +265,7 @@ def _prompt_cache(data: dict[str, Any]) -> PromptCache:
         ttl=CACHE_TTLS.get(data.get("ttl") or ""),
         misses=data.get("misses"),
         miss_causes=last_miss.get("causes") or [],
+        miss_recache_tokens=data.get("miss_recache_tokens"),
         recache_tokens_if_cold=data.get("recache_tokens_if_cold"),
     )
 
@@ -398,16 +430,129 @@ def context_column(session: Session, compact_limit: int | None) -> Column:
     return Column(top, bar=Bar(segments, CONTEXT_WIDTH))
 
 
-def session_column(session: Session, branch: str | None) -> Column:
+@dataclass(frozen=True)
+class Costs:
+    """What a session's responses cost, in USD, at list prices. Thinking is
+    output, but apart from `output`."""
+
+    input: float = 0.0
+    cache_write: float = 0.0
+    cache_read: float = 0.0
+    output: float = 0.0
+    thinking: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return (
+            self.input
+            + self.cache_write
+            + self.cache_read
+            + self.output
+            + self.thinking
+        )
+
+
+def response_usages(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """The model and the usage of each response in a transcript's lines. A
+    response that the transcript splits into entries repeats its usage in
+    each, so only its first entry counts."""
+    seen = set()
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # A line that Claude Code is still writing.
+        message = entry.get("message") if isinstance(entry, dict) else None
+        if entry.get("type") != "assistant" or not isinstance(message, dict):
+            continue
+        usage = message.get("usage")
+        if not isinstance(usage, dict) or message.get("id") in seen:
+            continue
+        seen.add(message.get("id"))
+        yield message.get("model") or "", usage
+
+
+def costs_of(usages: Iterable[tuple[str, dict[str, Any]]]) -> Costs:
+    """The cost of the responses that PRICES covers."""
+    input_cost = write = read = output = thinking = 0.0
+    for model, usage in usages:
+        prices = PRICES.get(model)
+        if prices is None or usage.get("speed") not in (None, "standard"):
+            continue
+        creation = usage.get("cache_creation") or {}
+        written_1h = creation.get("ephemeral_1h_input_tokens") or 0
+        written_5m = (usage.get("cache_creation_input_tokens") or 0) - written_1h
+        thought = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
+        input_cost += (usage.get("input_tokens") or 0) * prices.input
+        write += (written_5m * WRITE_5M + written_1h * WRITE_1H) * prices.input
+        read += (usage.get("cache_read_input_tokens") or 0) * prices.cache_read
+        output += ((usage.get("output_tokens") or 0) - thought) * prices.output
+        thinking += thought * prices.output
+    return Costs(*(cost / 1e6 for cost in (input_cost, write, read, output, thinking)))
+
+
+def transcripts(transcript: Path) -> list[Path]:
+    """The session's transcript, and its subagents' transcripts beside it."""
+    return [transcript, *sorted(transcript.with_suffix("").glob("subagents/*.jsonl"))]
+
+
+def read_costs(transcript: Path) -> Costs | None:
+    """The costs in the session's transcripts; None if they cannot be read."""
+    usages: list[tuple[str, dict[str, Any]]] = []
+    try:
+        for path in transcripts(transcript):
+            with path.open() as lines:
+                usages += response_usages(lines)
+    except OSError:
+        return None
+    return costs_of(usages)
+
+
+def miss_cost(session: Session) -> float | None:
+    """What the cache misses cost: their tokens, at the current model's write
+    price for the cache's lifetime."""
+    cache, prices = session.cache, PRICES.get(session.model_id.split("[")[0])
+    if cache is None or not cache.miss_recache_tokens or prices is None:
+        return None
+    write = WRITE_5M if cache.ttl == CACHE_TTLS["5m"] else WRITE_1H
+    return cache.miss_recache_tokens * write * prices.input / 1e6
+
+
+def cost_spans(session: Session, costs: Costs | None) -> list[Span]:
+    """The session's cost, then what it was spent on: "$17.19 = read 7.78 ·
+    write 4.76 (miss 0.40) · out 2.91 · think 1.74". "other" is the part of
+    Claude Code's total that the transcripts do not explain."""
+    if session.cost_usd is None:
+        return []
+    spans = [Span(f"${session.cost_usd:.2f}")]
+    if costs is None:
+        return spans
+    missed = miss_cost(session)
+    parts = [
+        ("in", costs.input, None),
+        ("read", costs.cache_read, None),
+        ("write", costs.cache_write, missed),
+        ("out", costs.output, None),
+        ("think", costs.thinking, None),
+        ("other", session.cost_usd - costs.total, None),
+    ]
+    shown = [part for part in parts if part[1] >= 0.005]
+    for index, (name, cost, within) in enumerate(shown):
+        spans.append(SEPARATOR if index else Span(" = ", DIM))
+        spans.append(Span(f"{name} {cost:.2f}"))
+        if within is not None and within >= 0.005:
+            spans.append(Span(f" (miss {within:.2f})", DIM))
+    return spans
+
+
+def session_column(session: Session, branch: str | None, costs: Costs | None) -> Column:
     """The model, its effort and the branch, over the cost."""
     top = [Span(session.model, CYAN)]
     if session.effort:
         top += [Span(" "), Span(session.effort, MAGENTA)]
     if branch:
         top += [Span(" "), Span(f"({branch})", RED)]
-    if session.cost_usd is None:
-        return Column(top)
-    return Column(top, [Span(f"${session.cost_usd:.2f}")])
+    return Column(top, cost_spans(session, costs))
 
 
 def compact_window(settings: dict[str, Any], model_id: str) -> int | None:
@@ -446,6 +591,7 @@ def status_line(
     branch: str | None,
     compact_limit: int | None,
     now: int,
+    costs: Costs | None = None,
     config: Config = DEFAULT_CONFIG,
 ) -> str:
     columns = []
@@ -465,7 +611,7 @@ def status_line(
                 "7d", SEVEN_DAYS, SEVEN_DAY_WIDTH, session.seven_day, now, config
             )
         )
-    columns.append(session_column(session, branch))
+    columns.append(session_column(session, branch, costs))
     return grid(columns)
 
 
@@ -508,6 +654,7 @@ def main() -> None:
             branch=git_branch(session.directory),
             compact_limit=compact_window(read_settings(), session.model_id),
             now=int(time.time()),
+            costs=read_costs(session.transcript) if session.transcript else None,
         )
     )
 

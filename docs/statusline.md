@@ -1,7 +1,8 @@
 # The Claude Code status line
 
-**Covers:** what `user/claude/statusline.py` shows, how to turn it on, how it
-is tested, and the facts about Claude Code's input that it depends on.
+**Covers:** what `user/claude/statusline.py` shows, how it splits the cost,
+how to turn it on, how it is tested, and the facts about Claude Code's input
+that it depends on.
 **Read before** you change the status line.
 **Tasks:** `tasks/2026-10-24-per-harness-files/` (why it is in
 `user/claude/`, and why only Claude Code has one).
@@ -12,12 +13,12 @@ Two lines, for example:
 
 ```text
 cache 42m ✗2 ttl1h · ctx 123k  · 5h 40% ↻2h05m   · 7d 84%▲ ↻3d4h    · Opus 5.5 high (main)
-█████▍               █▋          ████████▊         ████████▊████▌     $3.46
+█████▍               █▋          ████████▊         ████████▊████▌     $17.80 = read 8.36 · write 5.40 (miss 1.68) · out 3.11 · think 1.82
 ```
 
 On the left, a column for each gauge: its text, over a bar. On the right, the
 session: the model, its effort and the git branch of the working directory,
-over the session's cost.
+over the session's cost and what it was spent on (below).
 
 - **The prompt cache:** the time until it goes cold, or `cold`. In its last
   minutes, and when cold, the tokens that the next request writes again, in
@@ -59,6 +60,42 @@ text is longer, with its misses.
 
 `Config` in `statusline.py` holds the numbers that you can tune: the pace
 floor, when a rate limit turns red, and when the cache turns yellow.
+
+## The cost breakdown
+
+The total is Claude Code's `cost.total_cost_usd`. The parts are summed from
+the token usage of each response in the session's transcript
+(`transcript_path`) and in its subagents' transcripts beside it, at list
+prices:
+
+- **read:** cache reads.
+- **write:** cache writes, at 1.25 times the input price for the 5-minute
+  cache and 2 times for the 1-hour one. `(miss …)` is the part of it that cache
+  misses wrote again (`prompt_cache.miss_recache_tokens`, at the current
+  model's price).
+- **out** and **think:** output tokens. Thinking is billed as output; the API
+  reports it apart (`output_tokens_details.thinking_tokens`).
+- **in:** input that is not cached. Claude Code marks the prompt for caching,
+  so a miss is billed as a cache write, not as input. Only the few tokens after
+  the last cache marker of each request are uncached input, so this part is
+  usually too small to show.
+- **other:** the part of the total that the transcripts do not explain: Claude
+  Code's requests that write no transcript, and responses that are not priced.
+  In one session (2026-10-24), "other" was $2.08 of $21.93, compared with
+  `/usage`'s "Usage by model". $1.97 was Opus requests that the transcripts do
+  not have: 6.5M cache-read tokens, 38k cache-write, 14k output and 20k
+  uncached input. Two compactions explain the output; prompt suggestions
+  probably explain most of the reads, but that is not confirmed. $0.11 was
+  Haiku, which WebFetch and WebSearch use. The status line cannot split
+  "other": only OpenTelemetry's `api_request` events say which subsystem
+  (`query_source`) made each request. The transcripts' tokens at `PRICES` gave
+  `/usage`'s Opus cost to the cent, so the prices were right.
+
+A part under half a cent is not shown. `PRICES` in `statusline.py` holds the
+prices of each model, with the date that they were read. A model that is not
+in it, and a response in fast mode, are not priced, so their cost shows as
+"other". When Anthropic changes its prices, update `PRICES`. Reading this
+session's transcripts (16 MB) took 40 ms on 2026-10-24.
 
 ## Turn it on
 

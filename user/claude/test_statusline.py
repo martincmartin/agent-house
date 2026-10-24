@@ -3,8 +3,11 @@
 Run: python3 -B -m unittest discover -s user/claude (tools/check runs it).
 """
 
+import json
 import re
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 
 from statusline import (
@@ -20,6 +23,7 @@ from statusline import (
     SEVEN_DAYS,
     TRACK,
     WARN,
+    Costs,
     PromptCache,
     RateWindow,
     Session,
@@ -28,7 +32,11 @@ from statusline import (
     cache_column,
     compact_window,
     context_column,
+    cost_spans,
+    costs_of,
     passed_part,
+    read_costs,
+    response_usages,
     status_line,
     tokens,
     until,
@@ -183,7 +191,7 @@ class CacheTest(unittest.TestCase):
             (1, "█" * 18),
         ):
             with self.subTest(left=left):
-                cache = PromptCache(True, NOW + left, 3600, 0, [], None)
+                cache = PromptCache(True, NOW + left, 3600, 0, [], None, None)
                 column = cache_column(cache, NOW, DEFAULT_CONFIG)
                 assert column.bar is not None
                 self.assertEqual(
@@ -191,7 +199,7 @@ class CacheTest(unittest.TestCase):
                 )
 
     def test_unknown_ttl_has_no_fill(self) -> None:
-        cache = PromptCache(True, NOW + 1800, None, 0, [], None)
+        cache = PromptCache(True, NOW + 1800, None, 0, [], None, None)
         column = cache_column(cache, NOW, DEFAULT_CONFIG)
         assert column.bar is not None
         self.assertEqual(column.bar.segments, [])
@@ -313,7 +321,9 @@ class BarTest(unittest.TestCase):
     def test_each_bar_is_as_wide_as_the_widest_text_of_its_gauge(self) -> None:
         widest = {
             CACHE_WIDTH: cache_column(
-                PromptCache(False, None, None, 0, [], 999_999), NOW, DEFAULT_CONFIG
+                PromptCache(False, None, None, 0, [], None, 999_999),
+                NOW,
+                DEFAULT_CONFIG,
             ).top,
             CONTEXT_WIDTH: context_column(
                 Session.from_json({"model": OPUS, "context_window": context(999_999)}),
@@ -339,6 +349,88 @@ class BarTest(unittest.TestCase):
         for cells, spans in widest.items():
             with self.subTest(text=text(spans)):
                 self.assertEqual(width(spans), cells)
+
+
+def response(id: str, model: str = "claude-opus-5-5", **usage: Any) -> str:
+    """A transcript line for one response."""
+    entry = {"type": "assistant", "message": {"id": id, "model": model, "usage": usage}}
+    return json.dumps(entry)
+
+
+class CostTest(unittest.TestCase):
+    def test_each_response_counts_once(self) -> None:
+        lines = [
+            response("a", output_tokens=10),
+            response("a", output_tokens=10),
+            json.dumps({"type": "user", "message": {"content": "hi"}}),
+            '{"type": "assistant", "mess',  # A line still being written.
+            response("b", output_tokens=5),
+        ]
+        self.assertEqual(
+            [usage["output_tokens"] for _, usage in response_usages(lines)], [10, 5]
+        )
+
+    def test_categories_at_list_prices(self) -> None:
+        usage = {
+            "input_tokens": 1_000_000,
+            "cache_creation_input_tokens": 3_000_000,
+            "cache_creation": {"ephemeral_1h_input_tokens": 2_000_000},
+            "cache_read_input_tokens": 10_000_000,
+            "output_tokens": 1_000_000,
+            "output_tokens_details": {"thinking_tokens": 250_000},
+        }
+        # Opus 5.5: $4 input, $20 output, $0.20 cache read; writes 1.25x
+        # (5 minutes) and 2x (1 hour) the input price.
+        self.assertEqual(
+            costs_of([("claude-opus-5-5", usage)]),
+            Costs(
+                input=4.0,
+                cache_write=4.0 * (1.25 + 2 * 2),
+                cache_read=2.0,
+                output=15.0,
+                thinking=5.0,
+            ),
+        )
+
+    def test_unknown_models_and_fast_mode_are_not_priced(self) -> None:
+        usages: list[tuple[str, dict[str, Any]]] = [
+            ("claude-unknown", {"output_tokens": 1_000_000}),
+            ("claude-opus-5-5", {"output_tokens": 1_000_000, "speed": "fast"}),
+        ]
+        self.assertEqual(costs_of(usages), Costs())
+
+    def test_reads_the_subagents_transcripts_too(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "session.jsonl"
+            transcript.write_text(response("a", output_tokens=1_000_000) + "\n")
+            (Path(directory) / "session" / "subagents").mkdir(parents=True)
+            (Path(directory) / "session" / "subagents" / "agent-1.jsonl").write_text(
+                response("b", "claude-sonnet-5-5", output_tokens=1_000_000) + "\n"
+            )
+            self.assertEqual(read_costs(transcript), Costs(output=30.0))
+            self.assertIsNone(read_costs(Path(directory) / "missing.jsonl"))
+
+    def test_breakdown(self) -> None:
+        data = {
+            "model": OPUS,
+            "cost": {"total_cost_usd": 18.0},
+            "prompt_cache": {
+                "warm": True,
+                "ttl": "1h",
+                "expires_at": NOW + 3000,
+                "miss_recache_tokens": 100_000,
+            },
+        }
+        costs = Costs(
+            input=0.001, cache_write=4.0, cache_read=8.0, output=3.0, thinking=2.0
+        )
+        # The miss: 100k tokens at 2x $4 a million. "other": 18 - 17.001.
+        self.assertEqual(
+            text(cost_spans(Session.from_json(data), costs)),
+            "$18.00 = read 8.00 · write 4.00 (miss 0.80) · out 3.00 · think 2.00"
+            " · other 1.00",
+        )
+        self.assertEqual(text(cost_spans(Session.from_json(data), None)), "$18.00")
 
 
 class FormatTest(unittest.TestCase):
