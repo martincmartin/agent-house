@@ -11,8 +11,8 @@ is tested, and the facts about Claude Code's input that it depends on.
 Two lines, for example:
 
 ```text
-Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m · 7d 84%▲ ↻3d4h
-                                                      ██████▍           ████████▍
+Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m   · 7d 84%▲ ↻3d4h
+                                                      ██████████▏        █████████████▌
 ```
 
 - **The model, its effort and the git branch** of the working directory.
@@ -30,7 +30,9 @@ Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m · 
 - **A bar under each rate limit,** in the colour of its percentage, on a
   bright black track. It fills in eighths of a cell, with Unicode's left
   eighth blocks (`▏` to `▉`), the finest step of a bar in plain text. A
-  window's text is padded to the bar's width, so that two bars do not overlap.
+  window's text is padded with spaces to the bar's width, which is the widest
+  that the text can be. So the text and its bar are the same width, and two
+  bars do not overlap.
   Without rate limits, there is no second line.
 
 `Config` in `statusline.py` holds the numbers that you can tune: the pace

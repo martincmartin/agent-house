@@ -20,7 +20,11 @@ Before you…
   laptop, `~/Develop/agent-house/main`). Every harness reads its files, so a
   change there is live at once, also a change that is not finished. Work in a
   worktree on a branch, run `tools/check`, and then fast-forward `main` in that
-  checkout.
+  checkout. The one exception is the status line (`user/claude/statusline.py`,
+  its tests and `docs/statusline.md`): edit it in that checkout, so that the
+  user sees each edit live. A broken edit there breaks only the status line.
+  Run `tools/check` before you commit, and then bring the other branches up to
+  `main`.
 - **Everything in `user/` reaches all four harnesses** (Claude Code, Codex,
   OpenCode and Pi), **except `user/<harness>/`** (`claude`, `codex`,
   `opencode`, `pi`). Keep the shared files neutral. If a rule or a skill is

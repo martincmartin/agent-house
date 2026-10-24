@@ -5,13 +5,16 @@ Run: python3 -B -m unittest discover -s user/claude (tools/check runs it).
 
 import re
 import unittest
+from dataclasses import replace
 from typing import Any
 
 from statusline import (
     BLANK,
     DEFAULT_CONFIG,
+    FIVE_HOURS,
     GREEN,
     RED,
+    SEVEN_DAYS,
     YELLOW,
     RateWindow,
     Session,
@@ -20,6 +23,8 @@ from statusline import (
     status_line,
     tokens,
     until,
+    width,
+    window,
 )
 
 NOW = 1_800_000_000
@@ -31,6 +36,8 @@ RATE_LIMITS = {
         "resets_at": NOW + 3 * 86400 + 4 * 3600 + 100,
     },
 }
+# Bars of 10 cells: 10 eighths for each 1%.
+CONFIG = replace(DEFAULT_CONFIG, bar_width=10)
 ESCAPE = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -38,7 +45,7 @@ def line(
     data: dict[str, Any], branch: str | None = None, compact_limit: int | None = None
 ) -> str:
     """The status line for the input `data`, with colours."""
-    return status_line(Session.from_json(data), branch, compact_limit, NOW)
+    return status_line(Session.from_json(data), branch, compact_limit, NOW, CONFIG)
 
 
 def plain(
@@ -210,11 +217,28 @@ class BarTest(unittest.TestCase):
         for used, expected in cases.items():
             with self.subTest(used=used):
                 limit = RateWindow(used_percentage=used, resets_at=None)
-                self.assertEqual(bar(limit, DEFAULT_CONFIG).text, expected)
+                self.assertEqual(bar(limit, CONFIG).text, expected)
 
     def test_colour_follows_use(self) -> None:
         limit = RateWindow(used_percentage=84.2, resets_at=None)
-        self.assertTrue(bar(limit, DEFAULT_CONFIG).style.startswith(RED))
+        self.assertTrue(bar(limit, CONFIG).style.startswith(RED))
+
+    def test_the_default_bar_is_as_wide_as_the_widest_text(self) -> None:
+        widest = [
+            window(
+                "5h",
+                FIVE_HOURS,
+                RateWindow(100, NOW + 5 * 3600 - 1),
+                NOW,
+                DEFAULT_CONFIG,
+            ),
+            window(
+                "7d", SEVEN_DAYS, RateWindow(100, NOW + 86400 - 1), NOW, DEFAULT_CONFIG
+            ),
+        ]
+        self.assertEqual(
+            max(width(spans) for spans in widest), DEFAULT_CONFIG.bar_width
+        )
 
 
 class FormatTest(unittest.TestCase):

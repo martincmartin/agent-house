@@ -58,8 +58,10 @@ class Config:
     # Seconds: in its last seconds, the prompt cache turns yellow and shows
     # the tokens that the next request re-sends if it goes cold.
     cache_warning: int = 300
-    # Cells: the width of a rate limit's bar. Each cell has 8 steps.
-    bar_width: int = 10
+    # Cells: the width of a rate limit's bar. Each cell has 8 steps. 16 is
+    # the widest a window's text can be ("7d 100%▲ ↻23h59m"), so the bar
+    # reaches at least to the end of its text.
+    bar_width: int = 16
 
 
 DEFAULT_CONFIG = Config()
