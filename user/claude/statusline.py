@@ -12,9 +12,9 @@ Claude Code sends the session's data as JSON on stdin
 (https://code.claude.com/docs/en/statusline). A field that is absent is left
 out: rate_limits comes only on Pro and Max plans, after the first response;
 effort only for a model that supports it; prompt_cache after the first
-response. The context's tokens are unknown (context_window.current_usage is
-null) before the first response, and again after /compact until the next one:
-then total_input_tokens is 0, and the line shows "ctx ?".
+response. The context's tokens are unknown before the first response, and
+again after a compaction until the next one: then total_input_tokens is 0, and
+the line shows "ctx ?".
 
 Run it with -I, so that a module in the project's directory cannot shadow the
 standard library: `python3 -I statusline.py`. It needs Python 3.10 or later.
@@ -244,11 +244,8 @@ class Session:
             if data.get("transcript_path")
             else None,
             cost_usd=cost.get("total_cost_usd"),
-            context_tokens=(
-                context.get("total_input_tokens")
-                if context.get("current_usage") is not None
-                else None
-            ),
+            # 0 means not known: the context always holds the system prompt.
+            context_tokens=context.get("total_input_tokens") or None,
             context_window_size=context.get("context_window_size"),
             cache=_prompt_cache(cache)
             if cache and cache.get("warm") is not None

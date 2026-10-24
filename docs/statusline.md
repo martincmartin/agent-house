@@ -70,10 +70,11 @@ Claude Code sends the session's data as JSON on stdin
 ([status line docs](https://code.claude.com/docs/en/statusline), read
 2026-10-24). These facts are easy to get wrong:
 
-- **After `/compact`, the context's size is not known.**
-  `context_window.current_usage` is `null`, and `total_input_tokens` is `0`,
-  until the next response. The script shows `ctx ?`, not `ctx 0k`. The same is
-  true before the first response of a session.
+- **After a compaction, the context's size is not known.**
+  `total_input_tokens` is `0` until the next response. After `/compact`,
+  `context_window.current_usage` is `null` too, but after an idle compaction
+  it is not (seen on 2026-10-24). So the script shows `ctx ?` for `0`, not
+  `ctx 0k`. The same is true before the first response of a session.
 - **A compaction is not a cache miss.** `prompt_cache.misses` counts requests
   that wrote again what the cache already held, with no compaction to explain
   it. Claude Code counts a compaction in `expected_rebuilds`.

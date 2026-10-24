@@ -151,6 +151,9 @@ class StatusLineTest(unittest.TestCase):
             },
         }
         self.assertEqual(lines(data), ["ctx ?     · Opus 5.5", " " * CONTEXT_WIDTH])
+        # After an idle compaction, current_usage is set, but the tokens are 0.
+        data["context_window"] = context(0)
+        self.assertEqual(lines(data), ["ctx ?     · Opus 5.5", " " * CONTEXT_WIDTH])
 
     def test_context_follows_compact_window(self) -> None:
         session = Session.from_json({"model": OPUS, "context_window": context(560_000)})
