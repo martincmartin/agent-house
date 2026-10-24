@@ -1,9 +1,10 @@
-"""Claude Code status line.
+"""Claude Code status line, in two lines.
 
-The first line: model, effort, (git branch), session cost, context tokens,
-prompt cache (time until cold, misses, tokens that a cold cache re-sends), and
-the 5-hour and 7-day rate limits, each with its pace and the time until it
-resets. The second line: a bar under each rate limit, in eighths of a cell.
+On the left, a column for each gauge, with its text over a bar in eighths of a
+cell: the prompt cache (time until cold, the tokens that a cold cache writes
+again, and the session's misses), the context's tokens, and the 5-hour and
+7-day rate limits, each with its pace and the time until it resets. On the
+right: the model, its effort and the git branch, over the session's cost.
 
 Claude Code sends the session's data as JSON on stdin
 (https://code.claude.com/docs/en/statusline). A field that is absent is left
@@ -23,7 +24,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,42 +35,93 @@ MAGENTA = "\033[0;35m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
 RED = "\033[1;31m"
-# The background of a bar's empty part: the terminal's bright black.
-TRACK = "\033[100m"
 # 1/8 to 7/8 of a cell, filled from the left.
 EIGHTHS = "▏▎▍▌▋▊▉"
 # The braille pattern with no dots: one blank cell. Claude Code removes the
 # spaces at the start of a status line, but not this.
-BLANK = "\u2800"
+BLANK = "⠀"
 
 FIVE_HOURS = 5 * 3600
 SEVEN_DAYS = 7 * 86400
+CACHE_TTLS = {"5m": 300, "1h": 3600}
+
+# Cells: the least width of each gauge's bar. For the context and the rate
+# limits, it is the widest that the text can be, so that the bar always
+# reaches the end of its text. A column is as wide as its text, so the cache's
+# column grows when it shows its misses. test_statusline.py checks each one.
+CACHE_WIDTH = 18  # "cache cold (1000k)"
+CONTEXT_WIDTH = 9  # "ctx 1000k"
+FIVE_HOUR_WIDTH = 15  # "5h 100%▲ ↻4h59m"
+SEVEN_DAY_WIDTH = 16  # "7d 100%▲ ↻23h59m"
+
+# Short names for the causes of a cache miss that Claude Code's docs give. A
+# cause that is not here is shown with its own name.
+SHORT_CAUSES = {
+    "tools_changed": "tools",
+    "system_prompt_changed": "prompt",
+    "ttl_expired_5m": "ttl5m",
+    "ttl_expired_1h": "ttl1h",
+    "likely_server_side": "server",
+}
 
 
 @dataclass(frozen=True)
 class Config:
     """The numbers that a user can tune."""
 
-    # A rate-limit window is over pace when its use is ahead of the part of
-    # the window that has passed, and more than this percentage. The floor
+    # A rate-limit window is ahead of pace when its use is ahead of the part
+    # of the window that has passed, and more than this percentage. The floor
     # hides the mark early in a window, when a few requests are ahead of the
     # short time that has passed.
     pace_min_used: int = 10
+    # A window that is ahead of pace is yellow: at its average rate so far, it
+    # runs out before it resets. It is red when it runs out within this part
+    # of the window: 0.1 is 30 minutes of 5 hours, or 17 hours of 7 days.
+    alert_within: float = 0.1
     # Seconds: in its last seconds, the prompt cache turns yellow and shows
     # the tokens that the next request re-sends if it goes cold.
     cache_warning: int = 300
-    # Cells: the width of a rate limit's bar. Each cell has 8 steps. 16 is
-    # the widest a window's text can be ("7d 100%▲ ↻23h59m"), so the bar
-    # reaches at least to the end of its text.
-    bar_width: int = 16
 
 
 DEFAULT_CONFIG = Config()
 
 
 @dataclass(frozen=True)
+class Paint:
+    """A colour of a bar: as the text colour, for the filled part of a
+    glyph, and as the background, for the rest of its cell."""
+
+    fg: str
+    bg: str
+
+
+def colour256(index: int) -> Paint:
+    return Paint(f"\033[38;5;{index}m", f"\033[48;5;{index}m")
+
+
+# The empty part of a bar: the terminal's bright black.
+TRACK = Paint("\033[90m", "\033[100m")
+
+
+@dataclass(frozen=True)
+class Level:
+    """How much a gauge needs attention. `text` is the terminal's own colour,
+    for text. `solid` and `shade` are a bar's colours (256-colour), the shade
+    greyer than the solid."""
+
+    text: str
+    solid: Paint
+    shade: Paint
+
+
+OK = Level(GREEN, colour256(34), colour256(65))
+WARN = Level(YELLOW, colour256(178), colour256(137))
+ALERT = Level(RED, colour256(160), colour256(131))
+
+
+@dataclass(frozen=True)
 class Span:
-    """Text in one style: an SGR escape, or "" for none. Each character that
+    """Text in one style: SGR escapes, or "" for none. Each character that
     the status line uses is one terminal cell wide, so a span's width is its
     length."""
 
@@ -78,6 +130,8 @@ class Span:
 
 
 SEPARATOR = Span(" · ", DIM)
+# Between two columns on the second line.
+GAP = Span("   ")
 
 
 def render(spans: list[Span]) -> str:
@@ -91,6 +145,26 @@ def width(spans: list[Span]) -> int:
 
 
 @dataclass(frozen=True)
+class Bar:
+    """A bar's segments, in order: each one is filled from the end of the one
+    before it to its own end, a fraction of the bar. The ends must not
+    decrease. After the last end, the track. `cells` is its least width."""
+
+    segments: list[tuple[float, Paint]]
+    cells: int
+
+
+@dataclass(frozen=True)
+class Column:
+    """A column of the status line: its text on the first line, over a bar,
+    or over more text."""
+
+    top: list[Span]
+    bottom: list[Span] = field(default_factory=list)
+    bar: Bar | None = None
+
+
+@dataclass(frozen=True)
 class RateWindow:
     used_percentage: float
     resets_at: int | None
@@ -100,6 +174,8 @@ class RateWindow:
 class PromptCache:
     warm: bool
     expires_at: int | None
+    # Seconds that the cache stays warm after a request; None if not known.
+    ttl: int | None
     misses: int | None
     miss_causes: list[str]
     recache_tokens_if_cold: int | None
@@ -155,6 +231,7 @@ def _prompt_cache(data: dict[str, Any]) -> PromptCache:
     return PromptCache(
         warm=data["warm"],
         expires_at=data.get("expires_at"),
+        ttl=CACHE_TTLS.get(data.get("ttl") or ""),
         misses=data.get("misses"),
         miss_causes=last_miss.get("causes") or [],
         recache_tokens_if_cold=data.get("recache_tokens_if_cold"),
@@ -169,13 +246,13 @@ def _rate_window(data: dict[str, Any] | None) -> RateWindow | None:
     )
 
 
-def colour_of(value: int, limit: int) -> str:
-    """Green below half of `limit`, yellow below 80%, red from 80%."""
+def level_of(value: int, limit: int) -> Level:
+    """OK below half of `limit`, WARN below 80%, ALERT from 80%."""
     if value * 100 >= limit * 80:
-        return RED
+        return ALERT
     if value * 2 >= limit:
-        return YELLOW
-    return GREEN
+        return WARN
+    return OK
 
 
 def tokens(count: int) -> str:
@@ -196,50 +273,141 @@ def until(moment: int, now: int) -> str:
     return f"{minutes}m"
 
 
-def window(
-    name: str, length: int, limit: RateWindow, now: int, config: Config
-) -> list[Span]:
-    """A rate-limit window: "5h 64%▲ ↻2h05m". ▲ marks a use ahead of the time
-    that has passed in the window, which runs out before it resets."""
-    used = round(limit.used_percentage)
-    spans = [Span(f"{name} "), Span(f"{used}%", colour_of(used, 100))]
+def bar_spans(segments: list[tuple[float, Paint]], cells: int) -> list[Span]:
+    """A bar of `cells` cells, in eighths of a cell. Where two segments meet
+    inside a cell, its glyph is the first one's colour, on the second one's
+    background. A cell shows at most two segments."""
+    ends = [
+        (round(min(max(end, 0.0), 1.0) * cells * 8), paint) for end, paint in segments
+    ]
+
+    def paint_at(eighth: int) -> Paint:
+        return next((paint for end, paint in ends if eighth < end), TRACK)
+
+    spans: list[Span] = []
+    for first in range(0, cells * 8, 8):
+        left = paint_at(first)
+        filled = next(
+            (step for step in range(1, 8) if paint_at(first + step) != left), 8
+        )
+        if filled < 8:
+            span = Span(EIGHTHS[filled - 1], left.fg + paint_at(first + 7).bg)
+        elif left == TRACK:
+            span = Span(BLANK, TRACK.bg)
+        else:
+            span = Span("█", left.fg)
+        if spans and spans[-1].style == span.style:
+            spans[-1] = Span(spans[-1].text + span.text, span.style)
+        else:
+            spans.append(span)
+    return spans
+
+
+def passed_part(limit: RateWindow, length: int, now: int) -> float | None:
+    """The part of the window that has passed, from 0 to 1; None if its reset
+    time is not known."""
     if limit.resets_at is None:
-        return spans
-    passed = 100 - max(limit.resets_at - now, 0) * 100 // length
-    if used > config.pace_min_used and used > passed:
-        spans.append(Span("▲", RED))
-    return [*spans, Span(" "), Span(f"↻{until(limit.resets_at, now)}", DIM)]
+        return None
+    return 1 - min(max(limit.resets_at - now, 0), length) / length
 
 
-def bar(limit: RateWindow, config: Config) -> Span:
-    """A bar of `config.bar_width` cells, filled to the window's use, in
-    eighths of a cell."""
-    fraction = min(max(limit.used_percentage / 100, 0.0), 1.0)
-    full, rest = divmod(round(fraction * config.bar_width * 8), 8)
-    text = "█" * full + (EIGHTHS[rest - 1] if rest else "")
-    colour = colour_of(round(limit.used_percentage), 100)
-    return Span(text.ljust(config.bar_width), colour + TRACK)
+def window_level(limit: RateWindow, passed: float | None, config: Config) -> Level:
+    """OK on or behind pace, WARN ahead of it, ALERT when it runs out soon.
+    Without a reset time, the level of the use alone."""
+    if passed is None:
+        return level_of(round(limit.used_percentage), 100)
+    used = limit.used_percentage / 100
+    if limit.used_percentage <= config.pace_min_used or used <= passed:
+        return OK
+    # At the average rate so far, the part of the window until it runs out.
+    runs_out_in = (1 - used) * passed / used
+    return ALERT if runs_out_in < config.alert_within else WARN
 
 
-def cache_part(cache: PromptCache, now: int, config: Config) -> list[Span]:
+def window_column(
+    name: str, length: int, cells: int, limit: RateWindow, now: int, config: Config
+) -> Column:
+    """A rate-limit window: "5h 64%▲ ↻2h05m", over a bar of its use and of the
+    part of the window that has passed. ▲ marks a use ahead of pace. The bar
+    is solid to the lower of the two, and shaded between them."""
+    passed = passed_part(limit, length, now)
+    level = window_level(limit, passed, config)
+    used = round(limit.used_percentage)
+    top = [Span(f"{name} "), Span(f"{used}%", level.text)]
+    fraction = limit.used_percentage / 100
+    segments = [(fraction, level.solid)]
+    if limit.resets_at is not None and passed is not None:
+        if level is not OK:
+            top.append(Span("▲", RED))
+        top += [Span(" "), Span(f"↻{until(limit.resets_at, now)}", DIM)]
+        segments = [
+            (min(fraction, passed), level.solid),
+            (max(fraction, passed), level.shade),
+        ]
+    return Column(top, bar=Bar(segments, cells))
+
+
+def misses(cache: PromptCache) -> list[Span]:
+    """The session's cache misses, with short names for the last one's
+    causes."""
+    if not cache.misses:
+        return []
+    spans = [Span(f"✗{cache.misses}", WARN.text)]
+    if cache.miss_causes:
+        causes = ",".join(SHORT_CAUSES.get(cause, cause) for cause in cache.miss_causes)
+        spans += [Span(" "), Span(causes, DIM)]
+    return spans
+
+
+def cache_column(cache: PromptCache, now: int, config: Config) -> Column:
     """The time until the cache goes cold, yellow in its last minutes, or
     "cold". In its last minutes, or when cold, the tokens that the next
-    request re-sends. Then its misses, with the last one's cause."""
-    spans = [Span("cache ")]
+    request re-sends. Then the misses. The bar is the part of the cache's
+    lifetime that has passed: it is full when the cache goes cold."""
+    top = [Span("cache ")]
     if cache.warm and cache.expires_at is not None and cache.expires_at > now:
         left = cache.expires_at - now
-        colour = YELLOW if left < config.cache_warning else GREEN
-        spans.append(Span(until(cache.expires_at, now), colour))
+        level = WARN if left < config.cache_warning else OK
+        top.append(Span(until(cache.expires_at, now), level.text))
+        segments = [(1 - left / cache.ttl, level.solid)] if cache.ttl else []
     else:
-        left = 0
-        spans.append(Span("cold", RED))
+        left, level = 0, ALERT
+        top.append(Span("cold", ALERT.text))
+        segments = [(1.0, ALERT.solid)]
     if cache.recache_tokens_if_cold is not None and left < config.cache_warning:
-        spans += [Span(" "), Span(f"({tokens(cache.recache_tokens_if_cold)})", DIM)]
-    if cache.misses:
-        spans += [Span(" "), Span(f"✗{cache.misses}", YELLOW)]
-        if cache.miss_causes:
-            spans += [Span(" "), Span(",".join(cache.miss_causes), DIM)]
-    return spans
+        top += [Span(" "), Span(f"({tokens(cache.recache_tokens_if_cold)})", DIM)]
+    missed = misses(cache)
+    if missed:
+        top += [Span(" "), *missed]
+    return Column(top, bar=Bar(segments, CACHE_WIDTH))
+
+
+def context_column(session: Session, compact_limit: int | None) -> Column:
+    """The context's tokens, against the auto-compact window, else the context
+    window."""
+    limit = compact_limit or session.context_window_size
+    segments: list[tuple[float, Paint]] = []
+    if session.context_tokens is None:
+        top = [Span("ctx "), Span("?", DIM)]
+    elif not limit:
+        top = [Span(f"ctx {tokens(session.context_tokens)}")]
+    else:
+        level = level_of(session.context_tokens, limit)
+        top = [Span("ctx "), Span(tokens(session.context_tokens), level.text)]
+        segments = [(session.context_tokens / limit, level.solid)]
+    return Column(top, bar=Bar(segments, CONTEXT_WIDTH))
+
+
+def session_column(session: Session, branch: str | None) -> Column:
+    """The model, its effort and the branch, over the cost."""
+    top = [Span(session.model, CYAN)]
+    if session.effort:
+        top += [Span(" "), Span(session.effort, MAGENTA)]
+    if branch:
+        top += [Span(" "), Span(f"({branch})", RED)]
+    if session.cost_usd is None:
+        return Column(top)
+    return Column(top, [Span(f"${session.cost_usd:.2f}")])
 
 
 def compact_window(settings: dict[str, Any], model_id: str) -> int | None:
@@ -252,6 +420,27 @@ def compact_window(settings: dict[str, Any], model_id: str) -> int | None:
     return window_size if isinstance(window_size, int) else None
 
 
+def grid(columns: list[Column]) -> str:
+    """The columns side by side, each as wide as its widest line or its bar.
+    Without a second line, only the first."""
+    tops: list[Span] = []
+    bottoms: list[Span] = []
+    for index, column in enumerate(columns):
+        if index:
+            tops.append(SEPARATOR)
+            bottoms.append(GAP)
+        cells = max(
+            width(column.top),
+            width(column.bottom),
+            column.bar.cells if column.bar else 0,
+        )
+        bottom = bar_spans(column.bar.segments, cells) if column.bar else column.bottom
+        tops += [*column.top, Span(" " * (cells - width(column.top)))]
+        bottoms += [*bottom, Span(" " * (cells - width(bottom)))]
+    first, second = render(tops).rstrip(), render(bottoms).rstrip()
+    return f"{first}\n{second}" if second else first
+
+
 def status_line(
     session: Session,
     branch: str | None,
@@ -259,46 +448,25 @@ def status_line(
     now: int,
     config: Config = DEFAULT_CONFIG,
 ) -> str:
-    """The first line, and when there are rate limits, a second line with a
-    bar under each one."""
-    head = [Span(session.model, CYAN)]
-    if session.effort:
-        head += [Span(" "), Span(session.effort, MAGENTA)]
-    if branch:
-        head += [Span(" "), Span(f"({branch})", RED)]
-    parts = [head]
-    if session.cost_usd is not None:
-        parts.append([Span(f"${session.cost_usd:.2f}")])
-    if session.context_tokens is not None:
-        # Coloured against the auto-compact window, else the context window.
-        limit = compact_limit or session.context_window_size
-        colour = colour_of(session.context_tokens, limit) if limit else ""
-        parts.append([Span("ctx "), Span(tokens(session.context_tokens), colour)])
-    elif session.context_window_size is not None:
-        parts.append([Span("ctx "), Span("?", DIM)])
+    columns = []
     if session.cache is not None:
-        parts.append(cache_part(session.cache, now, config))
-    # Each bar starts in the column of its window, which is padded to the
-    # bar's width, so that the next bar does not overlap it.
-    bars: list[Span] = []
-    for name, length, rate_limit in (
-        ("5h", FIVE_HOURS, session.five_hour),
-        ("7d", SEVEN_DAYS, session.seven_day),
-    ):
-        if rate_limit is None:
-            continue
-        column = sum(width(part) + len(SEPARATOR.text) for part in parts)
-        bars += [Span(BLANK * (column - width(bars))), bar(rate_limit, config)]
-        part = window(name, length, rate_limit, now, config)
-        parts.append([*part, Span(" " * (config.bar_width - width(part)))])
-    first = render(
-        [
-            span
-            for index, part in enumerate(parts)
-            for span in ([SEPARATOR] if index else []) + part
-        ]
-    )
-    return f"{first.rstrip()}\n{render(bars)}" if bars else first.rstrip()
+        columns.append(cache_column(session.cache, now, config))
+    if session.context_tokens is not None or session.context_window_size is not None:
+        columns.append(context_column(session, compact_limit))
+    if session.five_hour is not None:
+        columns.append(
+            window_column(
+                "5h", FIVE_HOURS, FIVE_HOUR_WIDTH, session.five_hour, now, config
+            )
+        )
+    if session.seven_day is not None:
+        columns.append(
+            window_column(
+                "7d", SEVEN_DAYS, SEVEN_DAY_WIDTH, session.seven_day, now, config
+            )
+        )
+    columns.append(session_column(session, branch))
+    return grid(columns)
 
 
 def git_branch(directory: str | None) -> str | None:

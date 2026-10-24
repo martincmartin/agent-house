@@ -11,32 +11,54 @@ is tested, and the facts about Claude Code's input that it depends on.
 Two lines, for example:
 
 ```text
-Opus 5.5 high (main) · $3.46 · ctx 123k · cache 42m · 5h 64%▲ ↻2h05m   · 7d 84%▲ ↻3d4h
-                                                      ██████████▏        █████████████▌
+cache 42m ✗2 ttl1h · ctx 123k  · 5h 40% ↻2h05m   · 7d 84%▲ ↻3d4h    · Opus 5.5 high (main)
+█████▍               █▋          ████████▊         ████████▊████▌     $3.46
 ```
 
-- **The model, its effort and the git branch** of the working directory.
-- **The session's cost.**
-- **The context, in tokens.** Its colour is against the model's
-  `autoCompactWindow` in `settings.json` (`modelSettings`), else against the
-  context window. `ctx ?` means that Claude Code does not know the count yet.
+On the left, a column for each gauge: its text, over a bar. On the right, the
+session: the model, its effort and the git branch of the working directory,
+over the session's cost.
+
 - **The prompt cache:** the time until it goes cold, or `cold`. In its last
   minutes, and when cold, the tokens that the next request writes again, in
-  parentheses. Then `✗` and the session's cache misses, with the last miss's
-  cause when Claude Code gives one.
+  parentheses. Then `✗` and the session's cache misses, with short names for
+  the last miss's causes when Claude Code gives them (`SHORT_CAUSES` in
+  `statusline.py`; a cause with no short name keeps its own). The bar is the
+  part of the cache's lifetime (`ttl`) that has passed: empty after a request,
+  and full when the cache goes cold.
+- **The context, in tokens,** against the model's `autoCompactWindow` in
+  `settings.json` (`modelSettings`), else against the context window. `ctx ?`
+  means that Claude Code does not know the count yet; then the bar is empty.
 - **The 5-hour and 7-day rate limits:** the percentage used, and the time until
-  each resets. `▲` means that the use is ahead of the part of the window that
-  has passed, and above a floor, so that the window runs out before it resets.
-- **A bar under each rate limit,** in the colour of its percentage, on a
-  bright black track. It fills in eighths of a cell, with Unicode's left
-  eighth blocks (`▏` to `▉`), the finest step of a bar in plain text. A
-  window's text is padded with spaces to the bar's width, which is the widest
-  that the text can be. So the text and its bar are the same width, and two
-  bars do not overlap.
-  Without rate limits, there is no second line.
+  each resets. The bar is solid to the lower of the use and the part of the
+  window that has passed, and shaded (greyer) between the two. In a green bar,
+  the shade is budget that you have not used; in a yellow or red one, it is
+  use beyond pace. `▲` marks a use ahead of pace.
+
+**Colours** mean that a gauge needs your attention:
+
+- **A rate limit** is green on or behind pace, however much is used, and below
+  a floor of use. It is yellow ahead of pace: at the average rate so far, it
+  runs out before it resets. It is red when, at that rate, it runs out within
+  a part of the window (`alert_within`). Without a reset time, it is coloured
+  as the context is.
+- **The context** is green below 50% of its limit, yellow from 50%, and red
+  from 80%.
+- **The cache** is yellow in its last minutes, and red when cold.
+
+**The bars** fill in eighths of a cell, with Unicode's left eighth blocks (`▏`
+to `▉`), the finest step of a bar in plain text. Where two colours meet in a
+cell, the block is the first colour on the second as its background. The empty
+part of a bar is the track, in the terminal's bright black, and its end is
+100%. The bars' colours are 256-colour (`OK`, `WARN` and `ALERT` in
+`statusline.py`), because a shade needs a second green, yellow and red. Each
+bar is at least as wide as the widest text of its gauge (`CACHE_WIDTH` and
+the others; a test checks each one), and the text is padded to it, so the
+columns do not move when the text changes. The cache's column grows when its
+text is longer, with its misses.
 
 `Config` in `statusline.py` holds the numbers that you can tune: the pace
-floor, when the cache turns yellow, and the width of a bar.
+floor, when a rate limit turns red, and when the cache turns yellow.
 
 ## Turn it on
 
@@ -88,5 +110,6 @@ Claude Code sends the session's data as JSON on stdin
 - **`rate_limits` comes only on Pro and Max plans,** after the first response.
   Each window can be absent.
 - **Claude Code removes the spaces at the start of a line** that the script
-  prints (seen on 2026-10-24; the docs do not say so). So the bar line starts
-  with braille blanks (U+2800), which show as empty cells.
+  prints (seen on 2026-10-24; the docs do not say so). So the empty part of a
+  bar is braille blanks (U+2800), which show as empty cells: an empty bar at
+  the start of the second line keeps its place.
