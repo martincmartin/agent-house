@@ -3,12 +3,14 @@
 #
 # The two test-install runs are independent, so they run at the same time.
 # The second one is the macOS case: bash 3.2 runs install, and
-# /usr/bin/python3 (3.9) runs tools/convert-agent.py (AGENTS.md).
+# /usr/bin/python3 (3.9) runs tools/convert-agent.py (AGENTS.md). The Python
+# in user/claude/ needs 3.10 or later (docs/statusline.md).
 
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONVERTER="$REPO/tools/convert-agent.py"
+CLAUDE_PYTHON=("$REPO"/user/claude/*.py)
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
 failures=0
@@ -21,6 +23,11 @@ macos_pid=$!
 uvx ruff check --target-version py39 "$CONVERTER" || failures=$((failures + 1))
 uvx ruff format --check "$CONVERTER" || failures=$((failures + 1))
 uvx mypy --strict "$CONVERTER" || failures=$((failures + 1))
+uvx ruff check --target-version py310 "${CLAUDE_PYTHON[@]}" || failures=$((failures + 1))
+uvx ruff format --check "${CLAUDE_PYTHON[@]}" || failures=$((failures + 1))
+uvx mypy --strict "${CLAUDE_PYTHON[@]}" || failures=$((failures + 1))
+# -B: no __pycache__ in user/claude/.
+python3 -B -m unittest discover -q -s "$REPO/user/claude" || failures=$((failures + 1))
 
 # Wait for the test-install run $2, then show its summary, or what failed.
 finish() {

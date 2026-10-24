@@ -192,6 +192,27 @@ generated_source() {
     return 0
 }
 
+# Link each file in the source directory $1 to the same path in the directory
+# $2, which prepare_dir has checked. It links files one by one, not a whole
+# directory, as for skills: a harness writes its own files beside them. Hidden
+# files, backups (*~), tests (test_*) and __pycache__ stay in the repo.
+link_tree() {
+    local source target
+    for source in "$1"/*; do
+        target="$2/${source##*/}"
+        case "${source##*/}" in
+            *~ | test_* | __pycache__) continue ;;
+        esac
+        if [[ -d "$source" ]]; then
+            if check_source_dir "$source" && prepare_dir "$target"; then
+                link_tree "$source" "$target"
+            fi
+        elif check_source_file "$source"; then
+            make_link "$source" "$target"
+        fi
+    done
+}
+
 # Codex and OpenCode cannot read Claude Code's subagent format, so install
 # writes their subagents from the sources ($4 and on) with
 # tools/convert-agent.py. A comment in the first two lines says the file was
@@ -270,6 +291,12 @@ install_harness() {
         opencode) generate_agents "$dir" opencode md ${agents[@]+"${agents[@]}"} ;;
         *) link_each "$dir/agents" ${agents[@]+"${agents[@]}"} ;;
     esac
+    # The files for this harness only (docs/harnesses.md). A harness can have
+    # none.
+    if [[ -e "$USER_DIR/$harness" || -L "$USER_DIR/$harness" ]] &&
+        check_source_dir "$USER_DIR/$harness"; then
+        link_tree "$USER_DIR/$harness" "$dir"
+    fi
     if [[ "$harness" == claude ]]; then
         link_each "$dir/skills" ${skills[@]+"${skills[@]}"}
         if [[ -e "$dir/AGENTS.md" || -L "$dir/AGENTS.md" ]]; then

@@ -1,9 +1,11 @@
 # Where each harness reads its user-level configuration
 
-**Covers:** each harness's configuration paths, the source and generated-file
-checks in `install`, and the facts behind these rules.
+**Covers:** each harness's configuration paths, the files for one harness, the
+source and generated-file checks in `install`, and the facts behind these
+rules.
 **Read before** you change `install` or `tools/convert-agent.py`, add a harness,
-move a link, or add a subagent key.
+move a link, add a subagent key, or add a file to `user/<harness>/`.
+**Tasks:** `tasks/2026-10-24-per-harness-files/` (the files for one harness).
 
 The paths below are the defaults. `install` honours each harness's own override
 variable. The text says how each fact was found. Harnesses change their search
@@ -32,6 +34,31 @@ and each skill's `SKILL.md` must resolve to readable regular files.
 Source files can be links. If a source check fails, `install` reports it,
 skips what depends on that source, and exits with status 1.
 It continues with independent configuration and does not repair sources.
+
+## Files for one harness
+
+A file in `user/<harness>/` (`claude`, `codex`, `opencode` or `pi`) reaches
+that harness only. `install` links it to the same path in the harness's
+directory: `user/claude/statusline.py` becomes `~/.claude/statusline.py`. A
+harness can have no such directory.
+
+- **One file at a time.** `install` makes each subdirectory a directory of its
+  own and links the files in it, as for skills: the harness can write its own
+  files beside them.
+- **What stays in the repo:** hidden files, backups (`*~`), tests (`test_*`)
+  and `__pycache__`. Put a file's tests beside it, named `test_*`.
+- **The same checks as the other sources.** Each directory must allow reading
+  and searching. Each file must resolve to a readable regular file. A link
+  whose source is gone is reported as dangling.
+- **`install` does not edit a harness's settings.** A harness writes its own
+  settings file, so `install` does not own it. When a file needs a settings
+  entry to work, its doc gives the entry, and you add it by hand (for example,
+  [`statusline.md`](statusline.md)).
+
+Use it only when the harnesses' interfaces differ too much for one shared file.
+A status line is the first case: Claude Code runs a command, Pi a TypeScript
+extension, and Codex only shows its own built-in items
+(`tasks/2026-10-24-per-harness-files/`).
 
 ## Skills: one shared directory, and Claude Code's own
 
