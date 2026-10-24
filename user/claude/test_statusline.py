@@ -18,6 +18,7 @@ from statusline import (
     DEFAULT_CONFIG,
     FIVE_HOUR_WIDTH,
     FIVE_HOURS,
+    GREEN,
     OK,
     SEVEN_DAY_WIDTH,
     SEVEN_DAYS,
@@ -120,6 +121,7 @@ class StatusLineTest(unittest.TestCase):
                 self.assertNotEqual(second[column], " ")
                 self.assertTrue(column == 0 or second[column - 1] == " ")
         self.assertEqual(second.index("$3.46"), first.index("Opus"))
+        self.assertIn(f"{GREEN}~/project", line(data, branch="main"))
 
     def test_minimal(self) -> None:
         self.assertEqual(lines({"model": {"display_name": "Haiku"}}), ["Haiku"])

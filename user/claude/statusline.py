@@ -563,7 +563,8 @@ def session_column(
     if branch:
         top += [Span(" "), Span(f"({branch})", RED)]
     if session.directory:
-        top += [Span(" "), Span(short_path(session.directory, home))]
+        # The green of the user's shell prompt.
+        top += [Span(" "), Span(short_path(session.directory, home), GREEN)]
     return Column(top, cost_spans(session, costs))
 
 
