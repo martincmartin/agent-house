@@ -8,6 +8,7 @@ import unittest
 from typing import Any
 
 from statusline import (
+    BLANK,
     DEFAULT_CONFIG,
     GREEN,
     RED,
@@ -182,7 +183,7 @@ class BarTest(unittest.TestCase):
         self.assertEqual(second[five_hour : five_hour + 10], "██████▍   ")
         # 84.2% of 80 eighths is 67: 8 cells and 3 eighths.
         self.assertEqual(second[seven_day:], "████████▍ ")
-        self.assertEqual(second[:five_hour], " " * five_hour)
+        self.assertEqual(second[:five_hour], BLANK * five_hour)
 
     def test_a_short_window_is_padded_so_that_bars_do_not_overlap(self) -> None:
         limits = {

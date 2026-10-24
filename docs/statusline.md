@@ -85,3 +85,6 @@ Claude Code sends the session's data as JSON on stdin
   the next request.
 - **`rate_limits` comes only on Pro and Max plans,** after the first response.
   Each window can be absent.
+- **Claude Code removes the spaces at the start of a line** that the script
+  prints (seen on 2026-10-24; the docs do not say so). So the bar line starts
+  with braille blanks (U+2800), which show as empty cells.

@@ -38,6 +38,9 @@ RED = "\033[1;31m"
 TRACK = "\033[100m"
 # 1/8 to 7/8 of a cell, filled from the left.
 EIGHTHS = "▏▎▍▌▋▊▉"
+# The braille pattern with no dots: one blank cell. Claude Code removes the
+# spaces at the start of a status line, but not this.
+BLANK = "\u2800"
 
 FIVE_HOURS = 5 * 3600
 SEVEN_DAYS = 7 * 86400
@@ -283,7 +286,7 @@ def status_line(
         if rate_limit is None:
             continue
         column = sum(width(part) + len(SEPARATOR.text) for part in parts)
-        bars += [Span(" " * (column - width(bars))), bar(rate_limit, config)]
+        bars += [Span(BLANK * (column - width(bars))), bar(rate_limit, config)]
         part = window(name, length, rate_limit, now, config)
         parts.append([*part, Span(" " * (config.bar_width - width(part)))])
     first = render(
