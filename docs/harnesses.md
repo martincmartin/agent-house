@@ -50,6 +50,10 @@ harness can have no such directory.
 - **The same checks as the other sources.** Each directory must allow reading
   and searching. Each file must resolve to a readable regular file. A link
   whose source is gone is reported as dangling.
+- **A skill for one harness** goes in `user/<harness>/skills/<name>/`, for
+  example `user/claude/skills/statusline-legend/`. Its text says which
+  harness it is for. OpenCode also reads `~/.claude/skills`, so it sees a skill
+  for Claude Code too.
 - **`install` does not edit a harness's settings.** A harness writes its own
   settings file, so `install` does not own it. When a file needs a settings
   entry to work, its doc gives the entry, and you add it by hand (for example,

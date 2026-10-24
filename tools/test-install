@@ -132,13 +132,13 @@ for name in probe.txt~ test_probe.txt .hidden __pycache__; do
     check "$name stays in the repo" path_absent "$home/.codex/probe-dir/$name"
 done
 check "a file for one harness reaches no other harness" path_absent "$home/.pi/agent/probe-dir"
-for source in "$HOUSE"/user/claude/*; do
-    name="${source##*/}"
-    case "$name" in
-        *~ | test_* | __pycache__) check "$name for Claude stays in the repo" path_absent "$home/.claude/$name" ;;
+while IFS= read -r source; do
+    name="${source#"$HOUSE/user/claude/"}"
+    case "${name##*/}" in
+        *~ | test_* | .*) check "$name for Claude stays in the repo" path_absent "$home/.claude/$name" ;;
         *) check "$name for Claude is linked" links_to "$home/.claude/$name" "$source" ;;
     esac
-done
+done < <(find "$HOUSE/user/claude" -name __pycache__ -prune -o -type f -print)
 
 # A second run changes nothing and says nothing. "Changes nothing" is checked
 # by modification time. Everything in the home gets an old time first, so a
@@ -443,6 +443,15 @@ rm "$HOUSE/user/pi"
 check "a source for one harness that is not a directory fails the run" status_is 1
 check "a source for one harness that is not a directory is reported once" err_count_is 1 "user/pi: not a readable and searchable directory"
 check "a source for one harness that is not a directory leaves the rest" links_to "$home/.pi/agent/AGENTS.md" "$HOUSE/user/AGENTS.md"
+
+# A directory that the files for one harness and the shared skills both
+# write into has its links checked once.
+home="$(new_home claude-skills-dangling)"
+mkdir -p "$home/.claude/skills"
+ln -s "$scratch/gone" "$home/.claude/skills/gone"
+run_install "$home" --harness claude
+check "a dangling link in ~/.claude/skills fails the run" status_is 1
+check "a dangling link in ~/.claude/skills is reported once" err_count_is 1 'skills/gone: dangling link'
 
 # The layout before skills moved to ~/.agents/skills.
 home="$(new_home old-skills)"

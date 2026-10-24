@@ -11,7 +11,8 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
   this is not an oversight (`tasks/2026-10-21-review-without-subagent/`)
 - `user/<harness>/`: files for one harness only, linked to the same path in its
   directory. `user/claude/statusline.py` is the Claude Code status line
-  ([`statusline.md`](docs/statusline.md))
+  ([`statusline.md`](docs/statusline.md)), and the `statusline-legend` skill
+  says what each part of it means
 - `install`: links `user/` to where each harness reads it, and converts the
   subagents
 - `tools/`: `convert-agent.py` (used by `install`), `test-install`, and `check`,

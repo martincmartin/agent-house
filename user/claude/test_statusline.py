@@ -37,6 +37,7 @@ from statusline import (
     passed_part,
     read_costs,
     response_usages,
+    short_path,
     status_line,
     tokens,
     until,
@@ -60,8 +61,11 @@ ESCAPE = re.compile(r"\033\[[0-9;]*m")
 def line(
     data: dict[str, Any], branch: str | None = None, compact_limit: int | None = None
 ) -> str:
-    """The status line for the input `data`, with colours."""
-    return status_line(Session.from_json(data), branch, compact_limit, NOW)
+    """The status line for the input `data`, with colours, for the home
+    directory /home/me."""
+    return status_line(
+        Session.from_json(data), branch, compact_limit, NOW, home="/home/me"
+    )
 
 
 def lines(
@@ -101,12 +105,13 @@ class StatusLineTest(unittest.TestCase):
                 "last_miss_cause": {"causes": ["ttl_expired_1h"]},
             },
             "rate_limits": RATE_LIMITS,
+            "workspace": {"current_dir": "/home/me/project"},
         }
         first, second = lines(data, branch="main", compact_limit=700_000)
         self.assertEqual(
             first,
             "cache 42m ✗2 ttl1h · ctx 123k  · 5h 64%▲ ↻2h05m  · 7d 84%▲ ↻3d4h"
-            "    · Opus 5.5 high (main)",
+            "    · Opus 5.5 high (main) ~/project",
         )
         # Each column's bar starts under its text; the cost under the model.
         for label in ("cache", "ctx", "5h", "7d"):
@@ -434,6 +439,16 @@ class CostTest(unittest.TestCase):
 
 
 class FormatTest(unittest.TestCase):
+    def test_short_path(self) -> None:
+        self.assertEqual(
+            [
+                short_path(directory, "/home/me")
+                for directory in ("/home/me", "/home/me/a/b", "/home/meg", "/tmp")
+            ],
+            ["~", "~/a/b", "/home/meg", "/tmp"],
+        )
+        self.assertEqual(short_path("/tmp", ""), "/tmp")
+
     def test_tokens(self) -> None:
         self.assertEqual(
             [tokens(count) for count in (0, 499, 500, 123_456, 999_999, 1_000_000)],

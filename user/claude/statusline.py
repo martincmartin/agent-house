@@ -4,7 +4,8 @@ On the left, a column for each gauge, with its text over a bar in eighths of a
 cell: the prompt cache (time until cold, the tokens that a cold cache writes
 again, and the session's misses), the context's tokens, and the 5-hour and
 7-day rate limits, each with its pace and the time until it resets. On the
-right: the model, its effort and the git branch, over the session's cost and
+right: the model, its effort, the git branch and the directory, over the
+session's cost and
 what it was spent on, summed from the transcripts at list prices.
 
 Claude Code sends the session's data as JSON on stdin
@@ -545,13 +546,24 @@ def cost_spans(session: Session, costs: Costs | None) -> list[Span]:
     return spans
 
 
-def session_column(session: Session, branch: str | None, costs: Costs | None) -> Column:
-    """The model, its effort and the branch, over the cost."""
+def short_path(directory: str, home: str) -> str:
+    """The directory, with ~ for the home directory `home`."""
+    if home and (directory == home or directory.startswith(home + os.sep)):
+        return "~" + directory[len(home) :]
+    return directory
+
+
+def session_column(
+    session: Session, branch: str | None, costs: Costs | None, home: str
+) -> Column:
+    """The model, its effort, the branch and the directory, over the cost."""
     top = [Span(session.model, CYAN)]
     if session.effort:
         top += [Span(" "), Span(session.effort, MAGENTA)]
     if branch:
         top += [Span(" "), Span(f"({branch})", RED)]
+    if session.directory:
+        top += [Span(" "), Span(short_path(session.directory, home))]
     return Column(top, cost_spans(session, costs))
 
 
@@ -592,6 +604,7 @@ def status_line(
     compact_limit: int | None,
     now: int,
     costs: Costs | None = None,
+    home: str = "",
     config: Config = DEFAULT_CONFIG,
 ) -> str:
     columns = []
@@ -611,7 +624,7 @@ def status_line(
                 "7d", SEVEN_DAYS, SEVEN_DAY_WIDTH, session.seven_day, now, config
             )
         )
-    columns.append(session_column(session, branch, costs))
+    columns.append(session_column(session, branch, costs, home))
     return grid(columns)
 
 
@@ -655,6 +668,7 @@ def main() -> None:
             compact_limit=compact_window(read_settings(), session.model_id),
             now=int(time.time()),
             costs=read_costs(session.transcript) if session.transcript else None,
+            home=str(Path.home()),
         )
     )
 
