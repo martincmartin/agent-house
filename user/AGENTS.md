@@ -11,6 +11,9 @@
   quantitative over qualitative.
 - In all Markdown files, use LaTeX where appropriate, both inline (single
   dollar sign) and display/block (double dollar sign).
+- In replies shown in a terminal, which does not render LaTeX, write math as
+  plain text with Unicode (`T* = B + √(2g(B + c/r))`). For a long derivation,
+  offer an artifact page, which renders it.
 
 ## Docs and tasks
 
