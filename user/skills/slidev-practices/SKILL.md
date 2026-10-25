@@ -46,6 +46,12 @@ privacy-sensitive API, also test Safari itself, in regular and private windows,
 when it is available. Say which tests ran and which could not. Do not turn off
 a privacy protection to make the deck work.
 
+**Look at every picture you take.** Before you take a screenshot to check a
+change, write what each one must show: the state, and what must not be there.
+Then open every screenshot and compare it with that. A screenshot that nobody
+looks at checks nothing; start with the first state (a slider at 0, a figure
+before its button), where a stale picture shows most.
+
 ### Fonts
 
 These 14 font families are on both Windows and macOS, also in Firefox's
