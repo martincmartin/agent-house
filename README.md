@@ -13,12 +13,16 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
   directory. `user/claude/statusline.py` is the Claude Code status line
   ([`statusline.md`](docs/statusline.md)), and the `statusline-legend` skill
   says what each part of it means
+- `plugins/`: Claude Code plugins, which Claude Code reads from this checkout
+  (`.claude-plugin/marketplace.json` lists them). `plugins/status-band/` draws
+  the status line's gauges above the prompt in the VS Code panel
+  ([`status-band.md`](docs/status-band.md))
 - `install`: links `user/` to where each harness reads it, and converts the
   subagents
 - `tools/`: `convert-agent.py` (used by `install`), `test-install`, and `check`,
   which runs every check before a commit
 - `docs/` ([`README.md`](docs/README.md)): where each harness reads what, and
-  why; the status line
+  why; the status line and the VS Code status band
 - `tasks/`: one directory for each decision: its options, evidence and inputs
 - `AGENTS.md`: the rules for working on this repo. No harness gets it as
   user-level instructions.
@@ -44,6 +48,10 @@ it, and run `install` again.
 
 `~/init-files/install-me` clones this repo to `~/Develop/agent-house/main` if it
 is not there, and then runs `install`.
+
+`install` does not install the plugins in `plugins/`. Install each one once, by
+hand, as its doc says: for the VS Code status band,
+[`status-band.md`](docs/status-band.md#turn-it-on).
 
 ### Claude Code cloud sessions
 

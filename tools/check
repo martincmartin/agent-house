@@ -4,16 +4,56 @@
 # The two test-install runs are independent, so they run at the same time.
 # The second one is the macOS case: bash 3.2 runs install, and
 # /usr/bin/python3 (3.9) runs tools/convert-agent.py (AGENTS.md). The Python
-# in user/claude/ needs 3.10 or later (docs/statusline.md).
+# in user/claude/ needs 3.10 or later (docs/statusline.md). The status band
+# needs the claude command and npx (docs/status-band.md).
 
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONVERTER="$REPO/tools/convert-agent.py"
 CLAUDE_PYTHON=("$REPO"/user/claude/*.py)
+BAND="$REPO/plugins/status-band"
+# The checkout of the main worktree, which install linked.
+MAIN="$(dirname "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)")"
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
 failures=0
+
+# Run a check with its output in the log $1, and show the log if it fails.
+quiet() {
+    local log="$logs/$1"
+    shift
+    "$@" >"$log" 2>&1 || {
+        cat "$log"
+        failures=$((failures + 1))
+    }
+}
+
+# The mod API's types, which the engine writes when a session loads the mod:
+# this checkout's if a session loaded it, else the main checkout's.
+band_types() {
+    local checkout
+    for checkout in "$REPO" "$MAIN"; do
+        if [[ -f "$checkout/plugins/status-band/.claude-plugin/types/claude-code/index.d.ts" ]]; then
+            echo "$checkout/plugins/status-band/.claude-plugin/types"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Type-check the band with its own tsconfig.json, and the types of band_types.
+band_tsc() {
+    local types
+    if ! types="$(band_types)"; then
+        echo "tools/check: no types for the status band in $REPO or $MAIN:" \
+            "start a session that loads it (docs/status-band.md)"
+        return 1
+    fi
+    printf '{ "extends": "%s/tsconfig.json", "compilerOptions": { "typeRoots": ["%s"] } }\n' \
+        "$BAND" "$types" >"$logs/tsconfig.json"
+    npx -y -p typescript@5.9.3 tsc -p "$logs/tsconfig.json"
+}
 
 "$REPO/tools/test-install" bash >"$logs/bash" 2>&1 &
 bash_pid=$!
@@ -28,6 +68,10 @@ uvx ruff format --check "${CLAUDE_PYTHON[@]}" || failures=$((failures + 1))
 uvx mypy --strict "${CLAUDE_PYTHON[@]}" || failures=$((failures + 1))
 # -B: no __pycache__ in user/claude/.
 python3 -B -m unittest discover -q -s "$REPO/user/claude" || failures=$((failures + 1))
+quiet marketplace claude plugin validate "$REPO"
+quiet band-validate claude plugin validate "$BAND"
+quiet band-test claude plugin test "$BAND"
+quiet band-tsc band_tsc
 
 # Wait for the test-install run $2, then show its summary, or what failed.
 finish() {

@@ -8,6 +8,9 @@ read its legend too.
 **Tasks:** `tasks/2026-10-24-per-harness-files/` (why it is in
 `user/claude/`, and why only Claude Code has one).
 
+The VS Code extension's panel does not run the status line. There, a plugin
+draws its gauges above the prompt ([`status-band.md`](status-band.md)).
+
 ## What it shows
 
 What each part of the line means (the gauges, their bars, colours and widths,
@@ -22,9 +25,13 @@ floor, when a rate limit turns red, and when the cache turns yellow.
 ## How the cost is split
 
 The parts come from the token usage of each response in the transcripts, at
-`PRICES`. `PRICES` holds the prices of each model, with the date that they
-were read. When Anthropic changes its prices, update it. Reading this
-session's transcripts (16 MB) took 40 ms on 2026-10-24.
+the list prices in `user/claude/prices.json`. It holds the prices of each
+model, with the date that they were read, and the status band reads it too
+([`status-band.md`](status-band.md)). When Anthropic changes its prices, or
+adds a model, update it. The script reads it beside its real path, through
+the link that `install` made. If it cannot read the file, the line shows the
+total cost with no parts. Reading this session's transcripts (16 MB) took
+40 ms on 2026-10-24.
 
 In one session (2026-10-24), "other" was $2.08 of $21.93, compared with
 `/usage`'s "Usage by model". $1.97 was Opus requests that the transcripts do
@@ -33,7 +40,8 @@ input. Two compactions explain the output; prompt suggestions probably explain
 most of the reads, but that is not confirmed. $0.11 was Haiku, which WebFetch
 and WebSearch use. Only OpenTelemetry's `api_request` events say which
 subsystem (`query_source`) made each request. The transcripts' tokens at
-`PRICES` gave `/usage`'s Opus cost to the cent, so the prices were right.
+the list prices gave `/usage`'s Opus cost to the cent, so the prices were
+right.
 
 ## Turn it on
 

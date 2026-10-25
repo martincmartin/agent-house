@@ -1,0 +1,137 @@
+{
+  "writtenAt": "2026-10-25T14:42:21.467Z",
+  "surfaces": [
+    "vscode"
+  ],
+  "rendered": [
+    "AbovePrompt:vscode",
+    "Pane:vscode:dock"
+  ],
+  "probes": [
+    {
+      "name": "process.run printenv HOME",
+      "result": "~"
+    },
+    {
+      "name": "process.run git branch",
+      "result": "exit 0: main"
+    },
+    {
+      "name": "fs.read own plugin.json",
+      "result": "ok, 191 chars: ~/.claude/dev-mods/<session>/status-probe/.claude-plugin/plugin.json"
+    },
+    {
+      "name": "fs.read file in cwd",
+      "result": "ok, 24204 chars: user/claude/statusline.py"
+    },
+    {
+      "name": "fs.read settings.json, outside cwd",
+      "result": "ok, 499 chars: ~/.claude/settings.json"
+    },
+    {
+      "name": "fs.read transcript",
+      "result": "ok, 2270731 chars: ~/.claude/projects/<project>/<session>.jsonl"
+    },
+    {
+      "name": "process.run tail -c +1000001 transcript",
+      "result": "exit 0, 1272015 chars, truncated false"
+    },
+    {
+      "name": "process.run head -c 5000000 /dev/zero",
+      "result": "exit 0, 4194304 chars, truncated true"
+    },
+    {
+      "name": "config.list compact/model/effort",
+      "result": "[{\"key\":\"autoCompact\",\"value\":true},{\"key\":\"switchModelsOnFlag\",\"value\":\"Not asked yet\"},{\"key\":\"model\",\"value\":\"opus\"}]"
+    }
+  ],
+  "steps": [
+    {
+      "agentId": null,
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 927,
+        "cache_read_input_tokens": 171586,
+        "cache_creation_input_tokens": 1442,
+        "model": "claude-opus-5-5"
+      }
+    },
+    {
+      "agentId": null,
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 711,
+        "cache_read_input_tokens": 173028,
+        "cache_creation_input_tokens": 1327,
+        "model": "claude-opus-5-5"
+      }
+    },
+    {
+      "agentId": null,
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 4356,
+        "cache_read_input_tokens": 174355,
+        "cache_creation_input_tokens": 11623,
+        "model": "claude-opus-5-5"
+      }
+    },
+    {
+      "agentId": null,
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 242,
+        "cache_read_input_tokens": 185978,
+        "cache_creation_input_tokens": 4585,
+        "model": "claude-opus-5-5"
+      }
+    },
+    {
+      "agentId": null,
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 6112,
+        "cache_read_input_tokens": 190563,
+        "cache_creation_input_tokens": 1659,
+        "model": "claude-opus-5-5"
+      }
+    }
+  ],
+  "view": {
+    "usage": {
+      "startedAt": 1792933615043,
+      "context": {
+        "tokens": 192224,
+        "window": 1000000,
+        "percent": 19
+      },
+      "rateLimits": [
+        {
+          "kind": "five_hour",
+          "percentUsed": 27,
+          "resetsAt": "2026-10-25T17:40:00.000Z"
+        },
+        {
+          "kind": "seven_day",
+          "percentUsed": 75,
+          "resetsAt": "2026-10-25T15:00:00.000Z"
+        }
+      ],
+      "cost": {
+        "usd": 4.8274145
+      }
+    },
+    "ticks": 66,
+    "measures": 1,
+    "lastChanged": [
+      "context",
+      "rateLimits",
+      "cost"
+    ]
+  }
+}

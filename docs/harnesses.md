@@ -58,6 +58,11 @@ harness can have no such directory.
   settings file, so `install` does not own it. When a file needs a settings
   entry to work, its doc gives the entry, and you add it by hand (for example,
   [`statusline.md`](statusline.md)).
+- **A Claude Code plugin is not in `user/claude/`.** Claude Code loads a
+  plugin only when it is installed, not from a file in `~/.claude/`, so a link
+  does nothing for it. It goes in `plugins/`, and the repo is its plugin
+  source: you install it once, by hand, and Claude Code then reads it from
+  this checkout ([`status-band.md`](status-band.md#turn-it-on)).
 
 Use it only when the harnesses' interfaces differ too much for one shared file.
 A status line is the first case: Claude Code runs a command, Pi a TypeScript

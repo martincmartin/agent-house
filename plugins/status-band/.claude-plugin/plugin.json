@@ -1,0 +1,7 @@
+{
+  "name": "status-band",
+  "version": "0.1.0",
+  "description": "The context, the rate limits and the session's cost, with bars, above the prompt in the VS Code panel",
+  "author": { "name": "Martin C. Martin" },
+  "types": "./types/index.d.ts"
+}

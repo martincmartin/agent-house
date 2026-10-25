@@ -1,0 +1,12 @@
+{
+  "name": "agent-house",
+  "owner": { "name": "Martin C. Martin" },
+  "description": "Claude Code plugins of agent-house, read from this checkout",
+  "plugins": [
+    {
+      "name": "status-band",
+      "source": "./plugins/status-band",
+      "description": "The prompt cache, the context, the rate limits and the session's cost, with bars, above the prompt in the VS Code panel"
+    }
+  ]
+}

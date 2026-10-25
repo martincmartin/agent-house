@@ -70,25 +70,49 @@ SHORT_CAUSES = {
 
 @dataclass(frozen=True)
 class Prices:
-    """A model's list prices, in USD for a million tokens. A cache write
-    costs 1.25 times the input price for the 5-minute lifetime, and 2 times
-    for the 1-hour one."""
+    """A model's list prices, in USD for a million tokens."""
 
     input: float
     output: float
     cache_read: float
 
 
-# From Anthropic's price list (the claude-api skill's table of 2026-10-06).
-# A response from a model that is not here, or in fast mode, is not split:
-# its cost shows as "other".
-PRICES = {
-    "claude-fable-5-1": Prices(input=10.00, output=50.00, cache_read=0.25),
-    "claude-opus-5-5": Prices(input=4.00, output=20.00, cache_read=0.20),
-    "claude-sonnet-5-5": Prices(input=2.00, output=10.00, cache_read=0.20),
-}
-WRITE_5M = 1.25
-WRITE_1H = 2.0
+@dataclass(frozen=True)
+class PriceList:
+    """The list prices of each model, by its id. A cache write costs
+    `write_5m` times the input price for the 5-minute lifetime, and
+    `write_1h` times for the 1-hour one. A response from a model that is not
+    here, or in fast mode, is not split: its cost shows as "other"."""
+
+    models: dict[str, Prices]
+    write_5m: float
+    write_1h: float
+
+
+# Anthropic's price list, which the VS Code status band reads too
+# (docs/status-band.md). Beside the script's real path, because it runs
+# through the link that install made.
+PRICES_FILE = Path(__file__).resolve().with_name("prices.json")
+
+
+def read_prices(path: Path = PRICES_FILE) -> PriceList | None:
+    """The prices in `path`; None if it cannot be read."""
+    try:
+        data = json.loads(path.read_text())
+        return PriceList(
+            models={
+                model: Prices(
+                    input=float(prices["input"]),
+                    output=float(prices["output"]),
+                    cache_read=float(prices["cache_read"]),
+                )
+                for model, prices in data["models"].items()
+            },
+            write_5m=float(data["cache_write_5m"]),
+            write_1h=float(data["cache_write_1h"]),
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -470,22 +494,24 @@ def response_usages(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any]]
         yield message.get("model") or "", usage
 
 
-def costs_of(usages: Iterable[tuple[str, dict[str, Any]]]) -> Costs:
-    """The cost of the responses that PRICES covers."""
+def costs_of(usages: Iterable[tuple[str, dict[str, Any]]], prices: PriceList) -> Costs:
+    """The cost of the responses that `prices` covers."""
     input_cost = write = read = output = thinking = 0.0
     for model, usage in usages:
-        prices = PRICES.get(model)
-        if prices is None or usage.get("speed") not in (None, "standard"):
+        price = prices.models.get(model)
+        if price is None or usage.get("speed") not in (None, "standard"):
             continue
         creation = usage.get("cache_creation") or {}
         written_1h = creation.get("ephemeral_1h_input_tokens") or 0
         written_5m = (usage.get("cache_creation_input_tokens") or 0) - written_1h
         thought = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
-        input_cost += (usage.get("input_tokens") or 0) * prices.input
-        write += (written_5m * WRITE_5M + written_1h * WRITE_1H) * prices.input
-        read += (usage.get("cache_read_input_tokens") or 0) * prices.cache_read
-        output += ((usage.get("output_tokens") or 0) - thought) * prices.output
-        thinking += thought * prices.output
+        input_cost += (usage.get("input_tokens") or 0) * price.input
+        write += (
+            written_5m * prices.write_5m + written_1h * prices.write_1h
+        ) * price.input
+        read += (usage.get("cache_read_input_tokens") or 0) * price.cache_read
+        output += ((usage.get("output_tokens") or 0) - thought) * price.output
+        thinking += thought * price.output
     return Costs(*(cost / 1e6 for cost in (input_cost, write, read, output, thinking)))
 
 
@@ -494,7 +520,7 @@ def transcripts(transcript: Path) -> list[Path]:
     return [transcript, *sorted(transcript.with_suffix("").glob("subagents/*.jsonl"))]
 
 
-def read_costs(transcript: Path) -> Costs | None:
+def read_costs(transcript: Path, prices: PriceList) -> Costs | None:
     """The costs in the session's transcripts; None if they cannot be read."""
     usages: list[tuple[str, dict[str, Any]]] = []
     try:
@@ -503,20 +529,22 @@ def read_costs(transcript: Path) -> Costs | None:
                 usages += response_usages(lines)
     except OSError:
         return None
-    return costs_of(usages)
+    return costs_of(usages, prices)
 
 
-def miss_cost(session: Session) -> float | None:
+def miss_cost(session: Session, prices: PriceList) -> float | None:
     """What the cache misses cost: their tokens, at the current model's write
     price for the cache's lifetime."""
-    cache, prices = session.cache, PRICES.get(session.model_id.split("[")[0])
-    if cache is None or not cache.miss_recache_tokens or prices is None:
+    cache, price = session.cache, prices.models.get(session.model_id.split("[")[0])
+    if cache is None or not cache.miss_recache_tokens or price is None:
         return None
-    write = WRITE_5M if cache.ttl == CACHE_TTLS["5m"] else WRITE_1H
-    return cache.miss_recache_tokens * write * prices.input / 1e6
+    write = prices.write_5m if cache.ttl == CACHE_TTLS["5m"] else prices.write_1h
+    return cache.miss_recache_tokens * write * price.input / 1e6
 
 
-def cost_spans(session: Session, costs: Costs | None) -> list[Span]:
+def cost_spans(
+    session: Session, costs: Costs | None, prices: PriceList | None
+) -> list[Span]:
     """The session's cost, then what it was spent on: "$17.19 = read 7.78 ·
     write 4.76 (miss 0.40) · out 2.91 · think 1.74". "other" is the part of
     Claude Code's total that the transcripts do not explain."""
@@ -525,7 +553,7 @@ def cost_spans(session: Session, costs: Costs | None) -> list[Span]:
     spans = [Span(f"${session.cost_usd:.2f}")]
     if costs is None:
         return spans
-    missed = miss_cost(session)
+    missed = None if prices is None else miss_cost(session, prices)
     parts = [
         ("in", costs.input, None),
         ("read", costs.cache_read, None),
@@ -551,7 +579,11 @@ def short_path(directory: str, home: str) -> str:
 
 
 def session_column(
-    session: Session, branch: str | None, costs: Costs | None, home: str
+    session: Session,
+    branch: str | None,
+    costs: Costs | None,
+    prices: PriceList | None,
+    home: str,
 ) -> Column:
     """The model, its effort, the branch and the directory, over the cost."""
     top = [Span(session.model, CYAN)]
@@ -562,7 +594,7 @@ def session_column(
     if session.directory:
         # The green of the user's shell prompt.
         top += [Span(" "), Span(short_path(session.directory, home), GREEN)]
-    return Column(top, cost_spans(session, costs))
+    return Column(top, cost_spans(session, costs, prices))
 
 
 def compact_window(settings: dict[str, Any], model_id: str) -> int | None:
@@ -604,6 +636,7 @@ def status_line(
     costs: Costs | None = None,
     home: str = "",
     config: Config = DEFAULT_CONFIG,
+    prices: PriceList | None = None,
 ) -> str:
     columns = []
     if session.cache is not None:
@@ -622,7 +655,7 @@ def status_line(
                 "7d", SEVEN_DAYS, SEVEN_DAY_WIDTH, session.seven_day, now, config
             )
         )
-    columns.append(session_column(session, branch, costs, home))
+    columns.append(session_column(session, branch, costs, prices, home))
     return grid(columns)
 
 
@@ -659,14 +692,21 @@ def read_settings() -> dict[str, Any]:
 
 def main() -> None:
     session = Session.from_json(json.load(sys.stdin))
+    prices = read_prices()
+    costs = (
+        read_costs(session.transcript, prices)
+        if session.transcript and prices
+        else None
+    )
     print(
         status_line(
             session,
             branch=git_branch(session.directory),
             compact_limit=compact_window(read_settings(), session.model_id),
             now=int(time.time()),
-            costs=read_costs(session.transcript) if session.transcript else None,
+            costs=costs,
             home=str(Path.home()),
+            prices=prices,
         )
     )
 

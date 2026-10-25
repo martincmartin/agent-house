@@ -1,0 +1,6 @@
+{
+  "name": "status-probe",
+  "version": "0.1.0",
+  "description": "Probes what the VS Code panel draws and what a mod can read, for a VS Code status line",
+  "types": "./types/index.d.ts"
+}

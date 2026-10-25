@@ -25,6 +25,7 @@ from statusline import (
     TRACK,
     WARN,
     Costs,
+    PriceList,
     PromptCache,
     RateWindow,
     Session,
@@ -37,6 +38,7 @@ from statusline import (
     costs_of,
     passed_part,
     read_costs,
+    read_prices,
     response_usages,
     short_path,
     status_line,
@@ -57,6 +59,13 @@ RATE_LIMITS = {
     },
 }
 ESCAPE = re.compile(r"\033\[[0-9;]*m")
+
+
+def list_prices() -> PriceList:
+    """The prices in prices.json, which the sums below use."""
+    prices = read_prices()
+    assert prices is not None
+    return prices
 
 
 def line(
@@ -392,7 +401,7 @@ class CostTest(unittest.TestCase):
         # Opus 5.5: $4 input, $20 output, $0.20 cache read; writes 1.25x
         # (5 minutes) and 2x (1 hour) the input price.
         self.assertEqual(
-            costs_of([("claude-opus-5-5", usage)]),
+            costs_of([("claude-opus-5-5", usage)], list_prices()),
             Costs(
                 input=4.0,
                 cache_write=4.0 * (1.25 + 2 * 2),
@@ -402,12 +411,26 @@ class CostTest(unittest.TestCase):
             ),
         )
 
+    def test_reads_the_prices_file(self) -> None:
+        prices = list_prices()
+        self.assertEqual((prices.write_5m, prices.write_1h), (1.25, 2.0))
+        self.assertIn("claude-opus-5-5", prices.models)
+
+    def test_prices_that_cannot_be_read_are_none(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prices.json"
+            self.assertIsNone(read_prices(path))
+            path.write_text('{"models": []}')
+            self.assertIsNone(read_prices(path))
+            path.write_text("{")
+            self.assertIsNone(read_prices(path))
+
     def test_unknown_models_and_fast_mode_are_not_priced(self) -> None:
         usages: list[tuple[str, dict[str, Any]]] = [
             ("claude-unknown", {"output_tokens": 1_000_000}),
             ("claude-opus-5-5", {"output_tokens": 1_000_000, "speed": "fast"}),
         ]
-        self.assertEqual(costs_of(usages), Costs())
+        self.assertEqual(costs_of(usages, list_prices()), Costs())
 
     def test_reads_the_subagents_transcripts_too(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -417,8 +440,10 @@ class CostTest(unittest.TestCase):
             (Path(directory) / "session" / "subagents" / "agent-1.jsonl").write_text(
                 response("b", "claude-sonnet-5-5", output_tokens=1_000_000) + "\n"
             )
-            self.assertEqual(read_costs(transcript), Costs(output=30.0))
-            self.assertIsNone(read_costs(Path(directory) / "missing.jsonl"))
+            self.assertEqual(read_costs(transcript, list_prices()), Costs(output=30.0))
+            self.assertIsNone(
+                read_costs(Path(directory) / "missing.jsonl", list_prices())
+            )
 
     def test_breakdown(self) -> None:
         data = {
@@ -436,11 +461,13 @@ class CostTest(unittest.TestCase):
         )
         # The miss: 100k tokens at 2x $4 a million. "other": 18 - 17.001.
         self.assertEqual(
-            text(cost_spans(Session.from_json(data), costs)),
+            text(cost_spans(Session.from_json(data), costs, list_prices())),
             "$18.00 = read 8.00 · write 4.00 (miss 0.80) · out 3.00 · think 2.00"
             " · other 1.00",
         )
-        self.assertEqual(text(cost_spans(Session.from_json(data), None)), "$18.00")
+        self.assertEqual(
+            text(cost_spans(Session.from_json(data), None, list_prices())), "$18.00"
+        )
 
 
 class FormatTest(unittest.TestCase):

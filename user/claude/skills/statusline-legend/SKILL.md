@@ -1,6 +1,6 @@
 ---
 name: statusline-legend
-description: What each part of the Claude Code status line means, for this user's own status line (agent-house's statusline.py) - the gauges, their bars, colours and widths, the pace mark, cache misses, and what each part of the cost breakdown counts. Read when the user asks what something in their status line means. Claude Code only.
+description: What each part of the Claude Code status line means, for this user's own status line (agent-house's statusline.py) and its VS Code version (the status band plugin above the prompt) - the gauges, their bars, colours and widths, the pace mark, cache misses, and what each part of the cost breakdown counts. Read when the user asks what something in their status line or status band means. Claude Code only.
 ---
 
 # The status line: what each part means
@@ -79,7 +79,7 @@ text is longer, with its misses.
 The total is Claude Code's `cost.total_cost_usd`, the same as `/usage`'s
 "Total cost": the session's tokens at list price. The parts are summed from
 the token usage of each response in the session's transcript and in its
-subagents' transcripts, at the list prices in `PRICES` in the script:
+subagents' transcripts, at the list prices in `prices.json`, beside the script:
 
 - **read:** cache reads. Each request reads the whole context from the cache,
   so this part grows with the context's size times the number of requests.
@@ -97,8 +97,28 @@ subagents' transcripts, at the list prices in `PRICES` in the script:
 - **other:** the part of the total that the transcripts do not explain:
   requests that write no transcript (compactions, prompt suggestions, and the
   Haiku calls that WebFetch and WebSearch make), and responses that are not
-  priced (a model that is not in `PRICES`, or fast mode). The status line
+  priced (a model that is not in `prices.json`, or fast mode). The status line
   cannot split it: compare the transcripts with `/usage`'s "Usage by model".
   agent-house's `docs/statusline.md` has one session's measurement.
 
 A part under half a cent is not shown.
+
+## The VS Code status band
+
+In the VS Code panel, the plugin `status-band` (agent-house's
+`plugins/status-band/`, `docs/status-band.md`) draws the same gauges above the
+prompt box, with the same colours and pace rules. It differs in these ways:
+
+- **The layout:** a column for each gauge (cache, ctx, 5h, 7d), its text over
+  a thin bar with round ends, then a row with the cost and its parts. The
+  bars are SVG, so the eighths and the widths above apply to the CLI line
+  only.
+- **The cache:** the time until it goes cold, from the main transcript's last
+  response and the lifetime of the cache entries that the last writer wrote.
+  It can be a few seconds late. It shows no tokens to re-send and no misses
+  (`✗`), and the cost has no `(miss …)`: a plugin does not get these numbers.
+- **The context** shows its limit (`ctx 231k/500k`): the smaller of the
+  context window and the model's `autoCompactWindow`.
+- **A rate limit** shows its percentage as Claude Code gives it, to one
+  decimal (`23.5%`).
+- **It refreshes** each 10 seconds, and when Claude Code reports a change.

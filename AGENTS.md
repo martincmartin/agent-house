@@ -12,13 +12,16 @@ Before you…
   add a subagent key, or add a file to `user/<harness>/`: `docs/harnesses.md`
 - change the Claude Code status line (`user/claude/statusline.py`):
   `docs/statusline.md`
+- change the VS Code status band (`plugins/status-band/`) or the repo's plugin
+  list (`.claude-plugin/marketplace.json`): `docs/status-band.md`
 - add, rename or remove a doc: `docs/README.md`
 
 ## Rules
 
 - **Do not edit or commit in the checkout that `install` linked** (on a
-  laptop, `~/Develop/agent-house/main`). Every harness reads its files, so a
-  change there is live at once, also a change that is not finished. Work in a
+  laptop, `~/Develop/agent-house/main`). Every harness reads its files, and
+  Claude Code runs the plugins in `plugins/` from it, so a change there is
+  live at once, also a change that is not finished. Work in a
   worktree on a branch, run `tools/check`, and then fast-forward `main` in that
   checkout. The one exception is the status line (`user/claude/statusline.py`,
   its tests and `docs/statusline.md`): edit it in that checkout, so that the
@@ -63,7 +66,9 @@ tools/check
 
 It runs `tools/test-install` with bash, and again with bash 3.2 and Python 3.9
 (on macOS). It runs ruff and mypy on `tools/convert-agent.py` and on the Python
-in `user/claude/`, and the tests there (`test_*.py`).
+in `user/claude/`, and the tests there (`test_*.py`). For the status band, it
+runs `claude plugin validate`, `claude plugin test` and `tsc`
+(`docs/status-band.md`).
 
 When you change how `install` treats a case, add a check for it to
 `tools/test-install`.
