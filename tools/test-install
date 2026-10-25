@@ -17,6 +17,50 @@ trap 'rm -rf "$scratch"' EXIT
 HOUSE="$scratch/house"
 mkdir "$HOUSE"
 cp -R "$REPO/install" "$REPO/tools" "$REPO/user" "$HOUSE/"
+# A marketplace of two probe plugins, so that the plugin checks do not depend
+# on the repo's own list.
+mkdir "$HOUSE/.claude-plugin"
+echo '{"name": "probe-house", "plugins": [{"name": "probe-one"}, {"name": "probe-two"}]}' \
+    >"$HOUSE/.claude-plugin/marketplace.json"
+# A fake claude command, first on PATH, so that no test runs the real one. It
+# keeps the marketplaces and plugins of each test home in its own directory
+# under FAKE_CLAUDE_STATE, outside the home, and records each call there.
+# FAKE_CLAUDE_FAIL makes the call that starts with it fail, and
+# FAKE_CLAUDE_GARBLED makes the two lists print text that is not JSON.
+fake_bin="$scratch/fake-bin"
+mkdir "$fake_bin"
+export FAKE_CLAUDE_STATE="$scratch/fake-claude"
+cat >"$fake_bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+set -eu
+state="$FAKE_CLAUDE_STATE/${HOME##*/}"
+mkdir -p "$state"
+echo "$*" >>"$state/calls"
+if [[ -n "${FAKE_CLAUDE_FAIL:-}" && "$*" == "$FAKE_CLAUDE_FAIL"* ]]; then
+    printf 'fake claude: it went wrong\non two lines\n' >&2
+    exit 1
+fi
+case "$*" in
+    "plugin marketplace list --json" | "plugin list --json")
+        if [[ -n "${FAKE_CLAUDE_GARBLED:-}" ]]; then
+            echo "Marketplaces: none"
+            exit 0
+        fi
+        file="$state/marketplaces"
+        [[ "$*" == "plugin list --json" ]] && file="$state/plugins"
+        echo "[$(paste -s -d , "$file" 2>/dev/null)]"
+        ;;
+    "plugin marketplace add "*)
+        echo "{\"name\": \"probe-house\", \"source\": \"directory\", \"path\": \"$4\"}" >>"$state/marketplaces"
+        ;;
+    "plugin install "*)
+        echo "{\"id\": \"$3\", \"enabled\": true}" >>"$state/plugins"
+        ;;
+    *) exit 3 ;;
+esac
+FAKE
+chmod +x "$fake_bin/claude"
+export PATH="$fake_bin:$PATH"
 # A skill and the probe subagent, for the checks that need one of each.
 skills=("$HOUSE"/user/skills/*)
 probe_skill="${skills[0]}"
@@ -91,6 +135,11 @@ err_says() { grep -q -- "$1" "$scratch/err"; }
 err_count_is() { [[ "$(grep -c -- "$2" "$scratch/err")" -eq "$1" ]]; }
 out_is_empty() { [[ ! -s "$scratch/out" && ! -s "$scratch/err" ]]; }
 
+# The fake claude's state for the home $1, and the calls it was given.
+claude_state() { echo "$FAKE_CLAUDE_STATE/${1##*/}"; }
+calls_are() { [[ "$(cat "$(claude_state "$1")/calls" 2>/dev/null)" == "$2" ]]; }
+out_says() { grep -q -- "$1" "$scratch/out"; }
+
 new_home() {
     local home="$scratch/home-$1"
     mkdir -p "$home"
@@ -101,6 +150,13 @@ new_home() {
 home="$(new_home fresh)"
 run_install "$home"
 check "fresh install succeeds" status_is 0
+check "fresh install adds the marketplace and installs each plugin" calls_are "$home" "plugin marketplace list --json
+plugin marketplace add $HOUSE
+plugin list --json
+plugin install probe-one@probe-house
+plugin install probe-two@probe-house"
+check "fresh install says that it added the marketplace" out_says "added the plugin marketplace probe-house from $HOUSE"
+check "fresh install says that it installed a plugin" out_says "installed the plugin probe-two@probe-house"
 check "Claude reads user/AGENTS.md as CLAUDE.md" links_to "$home/.claude/CLAUDE.md" "$HOUSE/user/AGENTS.md"
 check "Codex AGENTS.md" links_to "$home/.codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
 check "OpenCode AGENTS.md" links_to "$home/.config/opencode/AGENTS.md" "$HOUSE/user/AGENTS.md"
@@ -186,31 +242,78 @@ done
 mv "$HOUSE/user/agents" "$scratch/source-agents"
 mkdir "$HOUSE/user/agents"
 home="$(new_home no-python)"
-PATH="$no_python_path" run_install "$home"
+PATH="$no_python_path" run_install "$home" --no-plugins
 check "an empty-agent install without Python succeeds" status_is 0
 check "an empty-agent install without Python sets up Codex" links_to "$home/.codex/AGENTS.md" "$HOUSE/user/AGENTS.md"
 check "an empty-agent install without Python sets up OpenCode" links_to "$home/.config/opencode/AGENTS.md" "$HOUSE/user/AGENTS.md"
-PATH="$no_python_path" run_install "$home"
+PATH="$no_python_path" run_install "$home" --no-plugins
 check "a second empty-agent install without Python succeeds" status_is 0
 check "a second empty-agent install without Python is silent" out_is_empty
 for target in "$home/.codex/agents/gone.toml" "$home/.config/opencode/agents/gone.md"; do
     echo "$gone_header" >"$target"
     touch "$(dirname "$target")/.agent-house.leftover"
 done
-PATH="$no_python_path" run_install "$home"
+PATH="$no_python_path" run_install "$home" --no-plugins
 check "stale files without Python fail the run" status_is 1
 check "a stale Codex agent without Python is reported" err_says "gone.toml: generated from"
 check "a stale OpenCode agent without Python is reported" err_says "gone.md: generated from"
 check "temporary files without Python are reported" err_count_is 2 'a temporary file from an earlier run'
 rmdir "$HOUSE/user/agents"
 mv "$scratch/source-agents" "$HOUSE/user/agents"
-PATH="$no_python_path" run_install "$home"
+PATH="$no_python_path" run_install "$home" --no-plugins
 check "source agents without Python fail the run" status_is 1
 check "source agents without Python get a clear error for each format" err_count_is 2 'python3 not found'
 check "stale files are checked when conversion needs Python" err_says "gone.toml: generated from"
 check "temporary files are checked when conversion needs Python" err_says "a temporary file from an earlier run"
 check "a stale generated subagent is kept" test -e "$home/.codex/agents/gone.toml"
 check "a temporary file is kept" test -e "$home/.codex/agents/.agent-house.leftover"
+
+# The plugins, with the fake claude.
+home="$(new_home no-plugins)"
+run_install "$home" --harness claude --no-plugins
+check "--no-plugins succeeds" status_is 0
+check "--no-plugins reports nothing" test ! -s "$scratch/err"
+check "--no-plugins runs no claude command" path_absent "$(claude_state "$home")"
+home="$(new_home codex-only)"
+run_install "$home" --harness codex
+check "a run without Claude runs no claude command" path_absent "$(claude_state "$home")"
+home="$(new_home other-marketplace)"
+mkdir -p "$(claude_state "$home")"
+echo '{"name": "probe-house", "source": "github", "repo": "someone/house"}' >"$(claude_state "$home")/marketplaces"
+run_install "$home" --harness claude
+check "a marketplace of that name from elsewhere fails" status_is 1
+check "a marketplace of that name from elsewhere is reported" \
+    err_says "probe-house is the github someone/house; expected the directory $HOUSE"
+check "a marketplace of that name from elsewhere is left as it is" calls_are "$home" "plugin marketplace list --json"
+home="$(new_home one-plugin)"
+mkdir -p "$(claude_state "$home")"
+echo "{\"name\": \"probe-house\", \"source\": \"directory\", \"path\": \"$HOUSE\"}" >"$(claude_state "$home")/marketplaces"
+echo '{"id": "probe-one@probe-house", "enabled": false}' >"$(claude_state "$home")/plugins"
+run_install "$home" --harness claude
+check "a run with one plugin installed succeeds" status_is 0
+check "a run with one plugin installed, and disabled, installs only the other" calls_are "$home" "plugin marketplace list --json
+plugin list --json
+plugin install probe-two@probe-house"
+home="$(new_home failed-plugin)"
+run_install "$home" FAKE_CLAUDE_FAIL="plugin install" --harness claude
+check "a failed plugin install fails" status_is 1
+check "a failed plugin install is reported on one line" \
+    err_count_is 1 "claude plugin install probe-one@probe-house failed with status 1: fake claude: it went wrong; on two lines"
+check "a failed plugin install still says what was done before it" out_says "added the plugin marketplace probe-house"
+home="$(new_home garbled-list)"
+run_install "$home" FAKE_CLAUDE_GARBLED=yes --harness claude
+check "a list that is not JSON fails" status_is 1
+check "a list that is not JSON is reported" err_says "claude plugin marketplace list --json: not JSON"
+home="$(new_home no-claude)"
+mkdir "$scratch/python-bin"
+ln -s "$(command -v python3)" "$scratch/python-bin/python3"
+PATH="$no_python_path:$scratch/python-bin" run_install "$home" --harness claude
+check "a run without claude fails" status_is 1
+check "a run without claude says so" err_count_is 1 "claude not found; it is needed to install the plugins"
+PATH="$no_python_path:$fake_bin" run_install "$home" --harness claude
+check "a run without python3 fails" status_is 1
+check "a run without python3 says that the plugins need it" \
+    err_count_is 1 "python3 not found; it is needed to install the plugins"
 
 # Each harness's override variable, with a space in each path.
 home="$(new_home overrides)"

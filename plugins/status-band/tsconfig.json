@@ -1,7 +1,7 @@
 {
-  // The mod API's types are in .claude-plugin/types/, which the engine writes
-  // when a session loads the mod. In a checkout that no session loaded,
-  // tools/check uses those of the main checkout (docs/status-band.md).
+  // The plugin API's types are the repo's copy in plugins/claude-code.d.ts:
+  // Claude Code does not write them for an installed plugin
+  // (docs/status-band.md).
   "compilerOptions": {
     "target": "es2023",
     "lib": ["es2023"],
@@ -19,8 +19,7 @@
     "jsx": "react",
     "jsxFactory": "h",
     "jsxFragmentFactory": "Fragment",
-    "typeRoots": ["./.claude-plugin/types"],
-    "types": ["claude-code", "claude-code-tools", "claude-code-mcp"]
+    "types": []
   },
-  "include": ["hooks", "types", "tests"]
+  "include": ["../claude-code.d.ts", "hooks", "types", "tests"]
 }

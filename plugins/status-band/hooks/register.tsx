@@ -2,8 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { View } from '../types'
-import { ALERT, addCosts, compactWindowOf, costParts, gauges, NO_COSTS, svgBar } from './gauges.ts'
-import { parsePrices, PRICES_PATH } from './prices.ts'
+import { ALERT, addCosts, compactWindowOf, costParts, gauges, NO_COSTS, svgBar, WARN } from './gauges.ts'
+import { pagePrices } from './price-check.ts'
+import { diffParts, isCurrent, parsePrices, priceDiff, PRICES_PATH } from './prices.ts'
 import { cacheOf, newTranscriptState, readTranscript, transcriptPaths } from './transcript.ts'
 import type { TranscriptState } from './transcript.ts'
 
@@ -16,8 +17,16 @@ const REFRESH_MS = 10_000
 const BAR_WIDTH = 120
 const BAR_HEIGHT = 6
 
-const EMPTY_VIEW: View = { usage: null, compactWindow: null, cache: null, costs: null, error: null }
-const view = atom({ plugin: 'status-band', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-2' })
+const EMPTY_VIEW: View = {
+  usage: null,
+  compactWindow: null,
+  cache: null,
+  costs: null,
+  prices: null,
+  priceCheckError: null,
+  error: null,
+}
+const view = atom({ plugin: 'status-band', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
 
 // One session's side table, made new by each session.start. `refreshes`
 // runs one refresh at a time, so that two reads of a transcript do not
@@ -54,7 +63,16 @@ async function refresh($: EngineInterface, session: Session): Promise<void> {
     const compactWindow =
       model === null ? null : compactWindowOf(await readSettings($, session.settings), model)
     const cache = main === undefined ? null : cacheOf(main)
-    await update($, view, () => ({ usage, compactWindow, cache, costs, error: null }))
+    const page = await pagePrices($, await $.clock.now())
+    await update($, view, () => ({
+      usage,
+      compactWindow,
+      cache,
+      costs,
+      prices: page.models === null ? null : priceDiff(prices, page.models),
+      priceCheckError: page.error,
+      error: null,
+    }))
   } catch (error) {
     await update($, view, last => ({ ...last, error: String(error) }))
   }
@@ -94,7 +112,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.surface !== 'vscode') return next(e)
-    const { usage, compactWindow, cache, costs, error } = await read($, view)
+    const { usage, compactWindow, cache, costs, prices, priceCheckError, error } = await read($, view)
     const { Box, Text, Svg } = $.ui.resolve(e)
     if (usage === null) {
       return error === null ? next(e) : <Text dimColor>status-band: {error}</Text>
@@ -134,6 +152,15 @@ export const register: Register = on => {
                 </Text>
               ))}
           </Text>
+        )}
+        {prices !== null && !isCurrent(prices) && (
+          <Text color={WARN.text}>
+            prices.json differs from the pricing page: {diffParts(prices).join(' · ')} (run
+            tools/update-prices.ts)
+          </Text>
+        )}
+        {priceCheckError !== null && (
+          <Text dimColor>status-band: could not read the pricing page: {priceCheckError}</Text>
         )}
         {error !== null && <Text dimColor>status-band: {error}</Text>}
       </Box>

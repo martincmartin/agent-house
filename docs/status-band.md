@@ -1,7 +1,8 @@
 # The VS Code status band
 
 **Covers:** the status band in the VS Code panel: where it is, how to turn it
-on, how it is tested, and the facts about the plugin API that it depends on.
+on, its check of the prices, how it is tested, and the facts about the plugin
+API that it depends on.
 **Read before** you change the band (`plugins/status-band/`) or the repo's
 plugin list (`.claude-plugin/marketplace.json`), and read its legend too.
 **Tasks:** `tasks/2026-10-25-vscode-status/` (the options, the probe, and why
@@ -24,9 +25,14 @@ change what the band shows, change the legend in the same change.
   text, the SVG bars and the cost of each response. They follow
   `statusline.py`.
 - `hooks/prices.ts`: reads the list prices from `user/claude/prices.json`,
-  which the CLI line reads too ([`statusline.md`](statusline.md#how-the-cost-is-split)).
-  The band reads the file of its own checkout on each refresh. When a
-  refresh fails, the band shows the error under its last gauges.
+  which the CLI line reads too ([`statusline.md`](statusline.md#how-the-cost-is-split)),
+  writes the file's text, and compares two price lists. The band reads the
+  file of its own checkout on each refresh. When a refresh fails, the band
+  shows the error under its last gauges.
+- `hooks/pricing-page.ts`: reads the price list from the table of
+  Anthropic's pricing page, in Markdown.
+- `hooks/price-check.ts`: the daily read of the pricing page
+  ([The prices](#the-prices)).
 - `hooks/transcript.ts`: the reads of the session's transcripts.
 - `hooks/register.tsx`: the hooks, and the drawing of the band.
 - `types/index.d.ts`: the state contract: what the band draws.
@@ -34,31 +40,42 @@ change what the band shows, change the legend in the same change.
 
 ## Turn it on
 
-The repo is a plugin source (a "marketplace" in Claude Code's words). Run this
-once, by hand:
-
-```bash
-claude plugin marketplace add ~/Develop/agent-house/main
-claude plugin install status-band@agent-house
-```
+The repo is a plugin source (a "marketplace" in Claude Code's words).
+`install` adds it, and installs the band, with Claude Code's own commands
+([`harnesses.md`](harnesses.md#claude-code-plugins)). Then start a new
+session, or run `/reload-plugins`.
 
 Claude Code reads a plugin of a folder marketplace from that folder, not from
 a copy. So an edit in the linked checkout reaches a session after
-`/reload-plugins`, with no reinstall. `install` does not run these commands:
-it does not edit Claude Code's settings
-([`harnesses.md`](harnesses.md#files-for-one-harness)), and it runs before
-Claude Code is installed.
+`/reload-plugins`, with no reinstall.
+
+## The prices
+
+The band reads Anthropic's pricing page, in Markdown, once a day, and keeps
+what it read in `$.store`, which lasts across sessions. When a read fails, it
+keeps the last price list, shows the error in a dim line, and tries again
+after an hour. When `prices.json` differs from the page, a yellow line names
+each difference. The page has no feed of new models or price changes, so a
+daily read is the check.
+
+To update the file, run `tools/update-prices.ts`. It reads the page and
+writes `prices.json` with the band's own code (`hooks/prices.ts` and
+`hooks/pricing-page.ts`), and prints each change. When the file is current,
+it prints nothing. The reader refuses a table whose columns changed, or a
+price that it cannot read: then fix `hooks/pricing-page.ts`. It skips the
+rows of a price that depends on the prompt's length.
 
 ## Test it
 
 `tools/check` runs `claude plugin validate` on the repo and on the band,
 `claude plugin test` on the band, and `tsc` with the band's `tsconfig.json`.
 
-`tsc` needs the plugin API's types, in `.claude-plugin/types/`. Claude Code
-writes them when a session loads the plugin, and git ignores them. A
-worktree that no session loaded has none, so `tools/check` uses those of the
-main checkout, where the installed plugin runs. When neither has them, it
-fails and says so: start a session in VS Code, or run `/reload-plugins`.
+`tsc` needs the plugin API's types. The repo keeps a copy,
+`plugins/claude-code.d.ts`, for the band and for `tools/update-prices.ts`.
+Claude Code does not write the types for an installed plugin, only into the
+folder of the `plugin-authoring` skill when that skill loads. To update the
+copy after Claude Code changes, load that skill in a session, then run
+`tools/update-plugin-types`. When the copy is current, it prints nothing.
 
 ## Facts about the plugin API
 
@@ -87,5 +104,6 @@ Found with Claude Code 2.1.310 on 2026-10-25, with a probe in VS Code
   `register` runs, not from inside a hook.
 - **The state contract must import nothing.** It declares the parts of the
   API's types that it needs. An atom with a `shape` is declared `Shaped<T>`.
-  When `View` changes, change the shape tag (`view-2`) in `register.tsx` and
-  the tests: a stored value with another tag reads as absent.
+  When `View` changes, change the shape tag (for example `view-3`) in
+  `register.tsx` and the tests: a stored value with another tag reads as
+  absent.

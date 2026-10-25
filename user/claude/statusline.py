@@ -70,47 +70,40 @@ SHORT_CAUSES = {
 
 @dataclass(frozen=True)
 class Prices:
-    """A model's list prices, in USD for a million tokens."""
+    """A model's list prices, in USD for a million tokens: a cache write for
+    the 5-minute and the 1-hour lifetime each has its own."""
 
     input: float
-    output: float
+    cache_write_5m: float
+    cache_write_1h: float
     cache_read: float
+    output: float
 
 
-@dataclass(frozen=True)
-class PriceList:
-    """The list prices of each model, by its id. A cache write costs
-    `write_5m` times the input price for the 5-minute lifetime, and
-    `write_1h` times for the 1-hour one. A response from a model that is not
-    here, or in fast mode, is not split: its cost shows as "other"."""
+# The list prices of each model, by its id. A response from a model that is
+# not here, or in fast mode, is not split: its cost shows as "other".
+PriceList = dict[str, Prices]
 
-    models: dict[str, Prices]
-    write_5m: float
-    write_1h: float
-
-
-# Anthropic's price list, which the VS Code status band reads too
-# (docs/status-band.md). Beside the script's real path, because it runs
-# through the link that install made.
+# Anthropic's price list, which the VS Code status band reads too, and
+# tools/update-prices.ts writes (docs/statusline.md). Beside the script's real
+# path, because it runs through the link that install made.
 PRICES_FILE = Path(__file__).resolve().with_name("prices.json")
 
 
 def read_prices(path: Path = PRICES_FILE) -> PriceList | None:
     """The prices in `path`; None if it cannot be read."""
     try:
-        data = json.loads(path.read_text())
-        return PriceList(
-            models={
-                model: Prices(
-                    input=float(prices["input"]),
-                    output=float(prices["output"]),
-                    cache_read=float(prices["cache_read"]),
-                )
-                for model, prices in data["models"].items()
-            },
-            write_5m=float(data["cache_write_5m"]),
-            write_1h=float(data["cache_write_1h"]),
-        )
+        models = json.loads(path.read_text())["models"]
+        return {
+            model: Prices(
+                input=float(prices["input"]),
+                cache_write_5m=float(prices["cache_write_5m"]),
+                cache_write_1h=float(prices["cache_write_1h"]),
+                cache_read=float(prices["cache_read"]),
+                output=float(prices["output"]),
+            )
+            for model, prices in models.items()
+        }
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
 
@@ -498,7 +491,7 @@ def costs_of(usages: Iterable[tuple[str, dict[str, Any]]], prices: PriceList) ->
     """The cost of the responses that `prices` covers."""
     input_cost = write = read = output = thinking = 0.0
     for model, usage in usages:
-        price = prices.models.get(model)
+        price = prices.get(model)
         if price is None or usage.get("speed") not in (None, "standard"):
             continue
         creation = usage.get("cache_creation") or {}
@@ -506,9 +499,7 @@ def costs_of(usages: Iterable[tuple[str, dict[str, Any]]], prices: PriceList) ->
         written_5m = (usage.get("cache_creation_input_tokens") or 0) - written_1h
         thought = (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0
         input_cost += (usage.get("input_tokens") or 0) * price.input
-        write += (
-            written_5m * prices.write_5m + written_1h * prices.write_1h
-        ) * price.input
+        write += written_5m * price.cache_write_5m + written_1h * price.cache_write_1h
         read += (usage.get("cache_read_input_tokens") or 0) * price.cache_read
         output += ((usage.get("output_tokens") or 0) - thought) * price.output
         thinking += thought * price.output
@@ -535,11 +526,13 @@ def read_costs(transcript: Path, prices: PriceList) -> Costs | None:
 def miss_cost(session: Session, prices: PriceList) -> float | None:
     """What the cache misses cost: their tokens, at the current model's write
     price for the cache's lifetime."""
-    cache, price = session.cache, prices.models.get(session.model_id.split("[")[0])
+    cache, price = session.cache, prices.get(session.model_id.split("[")[0])
     if cache is None or not cache.miss_recache_tokens or price is None:
         return None
-    write = prices.write_5m if cache.ttl == CACHE_TTLS["5m"] else prices.write_1h
-    return cache.miss_recache_tokens * write * price.input / 1e6
+    write = (
+        price.cache_write_5m if cache.ttl == CACHE_TTLS["5m"] else price.cache_write_1h
+    )
+    return cache.miss_recache_tokens * write / 1e6
 
 
 def cost_spans(

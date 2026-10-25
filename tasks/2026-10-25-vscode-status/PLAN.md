@@ -252,7 +252,81 @@ byte-identical (compared on one input with a transcript, rate limits and a
 cache miss, also through a link), and both gave the same split of this
 session's transcript.
 
-## Still to decide
+## When prices.json is stale (2026-10-25, with the user)
 
-- **How to know when `prices.json` is stale:** a new model, or a change of
-  price. Asked by the user on 2026-10-25.
+The question: how to know of a new model, or a change of price. Anthropic
+gives no feed of either. The options:
+
+- **A: the band reads the pricing page once a day, and says when the file
+  differs (chosen).** The page is in Markdown at
+  `https://platform.claude.com/docs/en/about-claude/pricing.md`, with one
+  table: "Model | Base input tokens | 5m cache writes | 1h cache writes |
+  Cache hits and refreshes | Output tokens". The user asked for the check
+  to run when the band runs, at most once a day. `tools/update-prices.ts`
+  writes the file with the same reader. At the user's request, the agent
+  ran it, and the file is its output.
+- B: a scheduled job: one more thing to install, and it runs when no one
+  looks.
+- C: by hand, when someone notices: the way the Sonnet error below got in.
+
+The reader refuses a table whose columns changed and a price that it cannot
+read, so a change of the page fails loudly, not with wrong prices. On
+2026-10-25 it read 19 models; it skips the rows of Haiku 5.5's prices that
+depend on the prompt's length.
+
+**Keep JSON, not the page's Markdown (with the user).** The user asked
+whether to store the Markdown page instead. The Python would then need its
+own reader of the table, a second copy of the parsing; JSON is read by both
+with no reader of our own, and one line for each model makes a change one
+line of a diff.
+
+**The schema changed:** each model now has its own five prices
+(`input`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `output`), as the
+page gives them. The ratios (1.25 and 2 times input) hold for every model on
+the page today, but the page states the prices, not the rule.
+
+## The Sonnet 5.5 cache read: $0.10, not $0.20
+
+The first `prices.json` had $0.20, copied from a skill's notes. The page says
+$0.10 (its footnote: Opus 5.5 and Sonnet 5.5 cache hits are 0.05 times input).
+Claude Code's own cost (`lastModelUsage` in `~/.claude.json`, one project,
+2026-10-25) decides it:
+
+- Sonnet 5.5: 16 input, 4,647 output, 142,450 cache read, 58,149 cache write
+  (5 minutes), costUSD 0.2061195. At $0.10: $0.2061195, exact. At $0.20:
+  $0.2204.
+- Opus 5.5: 16 input, 15,410 output, 492,205 cache read, 49,864 cache write
+  (1 hour), costUSD 0.805617, exact at the page's prices.
+
+The cost check of the CLI line ("to the cent") was of Opus, so it did not
+find the Sonnet error.
+
+## The plugin API's types: a copy in the repo (2026-10-25)
+
+Option (a) above failed: Claude Code does not write `.claude-plugin/types/`
+for an installed plugin, and not under `claude -p --plugin-dir` either. Only
+the `plugin-authoring` skill writes them, into its own folder under
+`/tmp/claude-<uid>/bundled-skills/<version>/`, when it loads. So the choice
+is (c), with the user: `plugins/claude-code.d.ts` (849 KB), which
+`tools/update-plugin-types` copies from the skill's folder. It is stale after
+a release only in the parts that changed, and `tsc` then reports a mismatch
+in the code that uses them.
+
+## install installs the plugins (2026-10-25, with the user)
+
+The earlier reasons not to do it were wrong. "It runs before Claude Code is
+installed" over-generalized from one machine: `install` runs whenever anyone
+runs it. "It does not edit Claude Code's settings" holds for the files that
+`install` writes, but `claude plugin` is Claude Code's own command, and
+Claude Code writes its own file; the rule in `docs/harnesses.md` now says so.
+
+- A missing `claude` is reported, as a missing `python3` is.
+- **`--no-plugins`** skips the step, for the cloud setup script: a cloud
+  session has no VS Code panel. The user asked whether `--no-vs-code` was
+  better; the step installs every plugin in the marketplace, not only the
+  VS Code one, so the flag names what it skips.
+- `tools/install-plugins.py` (Python 3.9, as `install` needs) reads the
+  output of `claude plugin marketplace list --json` and
+  `claude plugin list --json`. It adds the marketplace when it is absent, and
+  installs each plugin that is absent. A marketplace of that name from
+  elsewhere is reported and left as it is. A disabled plugin is left disabled.

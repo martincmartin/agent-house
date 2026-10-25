@@ -27,14 +27,34 @@ export interface Cache {
   readonly ttl: number
 }
 
+// A price that prices.json and the pricing page give differently, in USD
+// for a million tokens. `price` is its key in prices.json.
+export interface PriceChange {
+  readonly model: string
+  readonly price: string
+  readonly file: number
+  readonly page: number
+}
+
+// How prices.json differs from Anthropic's pricing page: the models that
+// only the page has, those that only the file has, and the changed prices.
+export interface PriceDiff {
+  readonly added: readonly string[]
+  readonly removed: readonly string[]
+  readonly changed: readonly PriceChange[]
+}
+
 // What the band draws. `compactWindow` is the model's autoCompactWindow in
 // settings.json, or null; `cache` is null until a response wrote to the
-// cache; `error` is the last refresh's failure, or null.
+// cache; `prices` is null until the pricing page was read; `priceCheckError`
+// is the last read's failure, and `error` the last refresh's, or null.
 export interface View {
   readonly usage: Usage | null
   readonly compactWindow: number | null
   readonly cache: Cache | null
   readonly costs: Costs | null
+  readonly prices: PriceDiff | null
+  readonly priceCheckError: string | null
   readonly error: string | null
 }
 

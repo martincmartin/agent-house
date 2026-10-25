@@ -14,6 +14,8 @@ Before you…
   `docs/statusline.md`
 - change the VS Code status band (`plugins/status-band/`) or the repo's plugin
   list (`.claude-plugin/marketplace.json`): `docs/status-band.md`
+- change `user/claude/prices.json`, `tools/update-prices.ts` or
+  `tools/update-plugin-types`: `docs/status-band.md`
 - add, rename or remove a doc: `docs/README.md`
 
 ## Rules
@@ -52,10 +54,11 @@ Before you…
   arrays, no `mapfile`, no `${var,,}`.
 - **The Python that `install` runs must work with Python 3.9** (macOS
   `/usr/bin/python3`): `~/init-files/install-me` runs `install` before it
-  installs Homebrew. Today that is `tools/convert-agent.py`. No `match`, no
-  `X | Y` outside annotations, and no library call that is new in 3.10 or
-  later. The Python that a harness runs needs only the Python that runs it:
-  `user/claude/statusline.py` needs 3.10 (`docs/statusline.md`).
+  installs Homebrew. Today that is `tools/convert-agent.py` and
+  `tools/install-plugins.py`. No `match`, no `X | Y` outside annotations, and
+  no library call that is new in 3.10 or later. The Python that a harness runs
+  needs only the Python that runs it: `user/claude/statusline.py` needs 3.10
+  (`docs/statusline.md`).
 - **The repo is public.** Put no secrets or licence keys in it.
 
 ## Before you commit
@@ -65,10 +68,10 @@ tools/check
 ```
 
 It runs `tools/test-install` with bash, and again with bash 3.2 and Python 3.9
-(on macOS). It runs ruff and mypy on `tools/convert-agent.py` and on the Python
-in `user/claude/`, and the tests there (`test_*.py`). For the status band, it
-runs `claude plugin validate`, `claude plugin test` and `tsc`
-(`docs/status-band.md`).
+(on macOS). It runs ruff and mypy on the Python that `install` runs and on the
+Python in `user/claude/`, and the tests there (`test_*.py`). For the status
+band, it runs `claude plugin validate`, `claude plugin test` and `tsc`, and
+`tsc` on `tools/update-prices.ts` (`docs/status-band.md`).
 
 When you change how `install` treats a case, add a check for it to
 `tools/test-install`.

@@ -1,0 +1,21 @@
+{
+  // tools/update-prices.ts, with the plugin code that it imports. node.d.ts
+  // declares the Node calls that it makes.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["update-prices.ts", "node.d.ts", "../plugins/claude-code.d.ts"]
+}

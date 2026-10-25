@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Copy the Claude Code plugin API's types to plugins/claude-code.d.ts, which
+# tsc checks the plugins against. Usage: tools/update-plugin-types
+#
+# Claude Code writes the file only when the plugin-authoring skill loads,
+# under the temporary directory of the version that runs, so load that skill
+# once in a session of this version first (docs/status-band.md).
+
+set -euo pipefail
+shopt -s nullglob
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="$REPO/plugins/claude-code.d.ts"
+
+version="$(claude --version)"
+version="${version%% *}"
+sources=("/tmp/claude-$(id -u)/bundled-skills/$version"/*/plugin-authoring/types/claude-code.d.ts)
+if [[ ${#sources[@]} -eq 0 ]]; then
+    echo "tools/update-plugin-types: no types of Claude Code $version:" \
+        "load the plugin-authoring skill in a session, then run this again" >&2
+    exit 1
+fi
+if cmp -s "${sources[0]}" "$TARGET"; then
+    exit 0
+fi
+cp "${sources[0]}" "$TARGET"
+echo "updated $TARGET from Claude Code $version"

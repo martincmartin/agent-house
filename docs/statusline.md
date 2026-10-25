@@ -26,12 +26,14 @@ floor, when a rate limit turns red, and when the cache turns yellow.
 
 The parts come from the token usage of each response in the transcripts, at
 the list prices in `user/claude/prices.json`. It holds the prices of each
-model, with the date that they were read, and the status band reads it too
-([`status-band.md`](status-band.md)). When Anthropic changes its prices, or
-adds a model, update it. The script reads it beside its real path, through
-the link that `install` made. If it cannot read the file, the line shows the
-total cost with no parts. Reading this session's transcripts (16 MB) took
-40 ms on 2026-10-24.
+model, one model on each line, with the page and the date that they were read
+from. `tools/update-prices.ts` writes it from Anthropic's pricing page, and
+prints what changed. The status band reads the file too, and it checks the
+page once a day and shows when the file differs
+([`status-band.md`](status-band.md#the-prices)). The script reads the file
+beside its real path, through the link that `install` made. If it cannot read
+the file, the line shows the total cost with no parts. Reading this session's
+transcripts (16 MB) took 40 ms on 2026-10-24.
 
 In one session (2026-10-24), "other" was $2.08 of $21.93, compared with
 `/usage`'s "Usage by model". $1.97 was Opus requests that the transcripts do
@@ -42,6 +44,12 @@ and WebSearch use. Only OpenTelemetry's `api_request` events say which
 subsystem (`query_source`) made each request. The transcripts' tokens at
 the list prices gave `/usage`'s Opus cost to the cent, so the prices were
 right.
+
+The Sonnet 5.5 cache read is $0.10 for a million tokens, as the page gives
+it, not the $0.20 that other notes give: this is not an oversight. Claude
+Code's own cost of each model (`lastModelUsage` in `~/.claude.json`) matched
+the page's prices to the cent for Sonnet 5.5, Opus 5.5 and Sonnet 4.6
+(`tasks/2026-10-25-vscode-status/`).
 
 ## Turn it on
 

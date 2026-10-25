@@ -412,9 +412,8 @@ class CostTest(unittest.TestCase):
         )
 
     def test_reads_the_prices_file(self) -> None:
-        prices = list_prices()
-        self.assertEqual((prices.write_5m, prices.write_1h), (1.25, 2.0))
-        self.assertIn("claude-opus-5-5", prices.models)
+        opus = list_prices()["claude-opus-5-5"]
+        self.assertEqual((opus.cache_write_5m, opus.cache_write_1h), (5.0, 8.0))
 
     def test_prices_that_cannot_be_read_are_none(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

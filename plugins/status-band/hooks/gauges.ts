@@ -309,7 +309,7 @@ export function responseOf(line: string): Response | null {
 // What a response cost, at `prices`; null for a model that is not there, or
 // a response in fast mode.
 export function costOf(response: Response, prices: PriceList): Costs | null {
-  const price = prices.models.get(response.model)
+  const price = prices.get(response.model)
   const speed = response.usage['speed']
   if (price === undefined || (speed !== undefined && speed !== null && speed !== 'standard')) {
     return null
@@ -322,7 +322,7 @@ export function costOf(response: Response, prices: PriceList): Costs | null {
   const thought = count(isFields(details) ? details : undefined, 'thinking_tokens')
   return {
     input: (count(usage, 'input_tokens') * price.input) / 1e6,
-    cacheWrite: ((written5m * prices.write5m + written1h * prices.write1h) * price.input) / 1e6,
+    cacheWrite: (written5m * price.cacheWrite5m + written1h * price.cacheWrite1h) / 1e6,
     cacheRead: (count(usage, 'cache_read_input_tokens') * price.cacheRead) / 1e6,
     output: ((count(usage, 'output_tokens') - thought) * price.output) / 1e6,
     thinking: (thought * price.output) / 1e6,

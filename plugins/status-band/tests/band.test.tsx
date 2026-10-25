@@ -18,24 +18,38 @@ import {
   until,
   WARN,
 } from '../hooks/gauges.ts'
-import { parsePrices } from '../hooks/prices.ts'
+import { isDue, storedRead } from '../hooks/price-check.ts'
+import { diffParts, isCurrent, modelsJson, parsePrices, priceDiff, pricesJson } from '../hooks/prices.ts'
+import { parsePricingPage } from '../hooks/pricing-page.ts'
 import { addLines, cacheOf, newTranscriptState, OUTPUT_LIMIT, takeLines } from '../hooks/transcript.ts'
 
 // 2026-10-25T14:00:00Z, in epoch seconds.
 const NOW = 1792936800
 
-// The prices of user/claude/prices.json on 2026-10-25. A test cannot read a
+// Prices from user/claude/prices.json on 2026-10-25. A test cannot read a
 // file, so the sums below use this copy.
 const PRICES = parsePrices(
   JSON.stringify({
-    cache_write_5m: 1.25,
-    cache_write_1h: 2.0,
     models: {
-      'claude-opus-5-5': { input: 4.0, output: 20.0, cache_read: 0.2 },
-      'claude-sonnet-5-5': { input: 2.0, output: 10.0, cache_read: 0.2 },
+      'claude-opus-5-5': { input: 4, cache_write_5m: 5, cache_write_1h: 8, cache_read: 0.2, output: 20 },
+      'claude-sonnet-5-5': { input: 2, cache_write_5m: 2.5, cache_write_1h: 4, cache_read: 0.1, output: 10 },
     },
   }),
 )
+
+// An excerpt of the pricing page's table (2026-10-25), with its footnote
+// marks, a link in a row's notes, and a model with tiers.
+const PAGE = `## Model pricing
+
+| Model                    | Base input tokens     | 5m cache writes | 1h cache writes | Cache hits and refreshes | Output tokens          |
+| ------------------------ | --------------------- | --------------- | --------------- | ------------------------ | ---------------------- |
+| Claude Opus 5.5          | $4 / MTok             | $5 / MTok       | $8 / MTok       | $0.20 / MTok<sup>2</sup> | $20 / MTok             |
+| Claude Opus 4.1 ([retired, except on Bedrock](https://example.com)) | $15 / MTok | $18.75 / MTok | $30 / MTok | $1.50 / MTok | $75 / MTok |
+| Claude Sonnet 5.5        | $2 / MTok             | $2.50 / MTok    | $4 / MTok       | $0.10 / MTok<sup>2</sup> | $10 / MTok             |
+| Claude Haiku 5.5 (for prompts up to 100,000 tokens) | $0.10 / MTok | $0.125 / MTok | $0.20 / MTok | $0.01 / MTok | $0.50 / MTok |
+
+*<sup>2 Cache hits and refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x the base input price.</sup>*
+`
 
 function assistant(
   id: string,
@@ -207,9 +221,66 @@ test('a response of a model without prices, or in fast mode, has no cost', () =>
 })
 
 test('a price list that is not in the shape of prices.json is refused, with what is wrong', () => {
-  expect(() => parsePrices('[]')).toThrow('prices.json: not an object')
-  expect(() => parsePrices('{"models": {"m": {"input": 1}}}')).toThrow('models.m.output is not a number')
-  expect(() => parsePrices('{"models": {}, "cache_write_5m": 1.25}')).toThrow('prices.cache_write_1h')
+  expect(() => parsePrices('[]')).toThrow('prices.json is not an object')
+  expect(() => parsePrices('{"models": {"m": {"input": 1}}}')).toThrow('models.m.cache_write_5m is not a number')
+  expect(() => parsePrices('{"models": []}')).toThrow('prices.json: models is not an object')
+})
+
+test('prices.json as the update tool writes it reads back as the same prices', () => {
+  const text = pricesJson(PRICES, 'https://example.com/pricing.md', '2026-10-25')
+  expect(parsePrices(text)).toEqual(PRICES)
+  expect(text).toMatch(/\n    "claude-opus-5-5": \{"input": 4, "cache_write_5m": 5, /)
+})
+
+test('the pricing page gives each model its prices, by its id, without its notes or tiers', () => {
+  const page = parsePricingPage(PAGE)
+  expect([...page.keys()]).toEqual(['claude-opus-5-5', 'claude-opus-4-1', 'claude-sonnet-5-5'])
+  expect(page.get('claude-sonnet-5-5')).toEqual({
+    input: 2,
+    cacheWrite5m: 2.5,
+    cacheWrite1h: 4,
+    cacheRead: 0.1,
+    output: 10,
+  })
+  expect(page.get('claude-opus-4-1')?.cacheWrite5m).toBe(18.75)
+})
+
+test('a pricing page whose table changed is refused, with what changed', () => {
+  expect(() => parsePricingPage(PAGE.replace('5m cache writes', '5-minute writes'))).toThrow(
+    'no table of model prices',
+  )
+  expect(() => parsePricingPage(PAGE.replace('$2.50 / MTok', 'see below'))).toThrow(
+    '5m cache writes of claude-sonnet-5-5 is not "$N / MTok"',
+  )
+})
+
+test('prices.json is compared with the page: changed, new and gone models', () => {
+  const page = parsePricingPage(PAGE)
+  const file = new Map([
+    ['claude-sonnet-5-5', { input: 2, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2, output: 10 }],
+    ['claude-opus-5-5', { input: 4, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.2, output: 20 }],
+    ['claude-old-1', { input: 1, cacheWrite5m: 1, cacheWrite1h: 1, cacheRead: 1, output: 1 }],
+  ])
+  const diff = priceDiff(file, page)
+  expect(diffParts(diff)).toEqual(['claude-sonnet-5-5 cache_read 0.2 → 0.1', 'new claude-opus-4-1', 'gone claude-old-1'])
+  expect(isCurrent(priceDiff(page, page))).toBe(true)
+})
+
+test('the page is read again a day after the last read, and an hour after a failed one', () => {
+  const read = { readAt: 0, triedAt: 0, models: PRICES, error: null }
+  expect(isDue(read, 86_400_000 - 1)).toBe(false)
+  expect(isDue(read, 86_400_000)).toBe(true)
+  const failed = { readAt: 0, triedAt: 86_400_000, models: PRICES, error: 'offline' }
+  expect(isDue(failed, 86_400_000 + 3_599_999)).toBe(false)
+  expect(isDue(failed, 86_400_000 + 3_600_000)).toBe(true)
+  expect(isDue({ ...failed, models: null }, 86_400_000 + 3_600_000)).toBe(true)
+})
+
+test('a stored read comes back as it was, and one in another shape as none', () => {
+  const stored = { readAt: 5, triedAt: 6, models: modelsJson(PRICES), error: null }
+  expect(storedRead(JSON.parse(JSON.stringify(stored)))).toEqual({ ...stored, models: PRICES })
+  expect(storedRead({ readAt: 5, triedAt: 6, models: { m: {} }, error: null }).models).toBeNull()
+  expect(storedRead(undefined).models).toBeNull()
 })
 
 test('only an assistant line with an id and a usage is a response', () => {
@@ -262,6 +333,8 @@ const VIEW: View = {
   compactWindow: 500_000,
   cache: { expiresAt: NOW + 3420, ttl: 3600 },
   costs: { ...NO_COSTS, cacheRead: 1.94, cacheWrite: 0.98, output: 0.61, thinking: 0.22 },
+  prices: null,
+  priceCheckError: null,
   error: null,
 }
 
@@ -280,7 +353,7 @@ const BAND = {
 } as const
 
 test('the band draws the gauges and the cost on VS Code', async ($, on) => {
-  on('state.get', () => ({ value: { value: { shape: 'view-2', value: VIEW }, version: 1 } }))
+  on('state.get', () => ({ value: { value: { shape: 'view-3', value: VIEW }, version: 1 } }))
   on('clock.now', () => ({ value: NOW * 1000 }))
 
   const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
@@ -295,8 +368,23 @@ test('the band draws the gauges and the cost on VS Code', async ($, on) => {
   await ui.unmount()
 })
 
+test('the band says when prices.json differs from the pricing page', async ($, on) => {
+  const diff = { added: ['claude-opus-6'], removed: [], changed: [] }
+  on('state.get', () => ({
+    value: { value: { shape: 'view-3', value: { ...VIEW, prices: diff } }, version: 1 },
+  }))
+  on('clock.now', () => ({ value: NOW * 1000 }))
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+
+  expect((await ui.find({ type: 'Text', text: /pricing page/ }))?.text).toBe(
+    'prices.json differs from the pricing page: new claude-opus-6 (run tools/update-prices.ts)',
+  )
+  await ui.unmount()
+})
+
 test('the band leaves the terminal to the CLI status line', async ($, on) => {
-  on('state.get', () => ({ value: { value: { shape: 'view-2', value: VIEW }, version: 1 } }))
+  on('state.get', () => ({ value: { value: { shape: 'view-3', value: VIEW }, version: 1 } }))
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>

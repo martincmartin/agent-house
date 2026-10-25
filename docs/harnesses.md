@@ -1,8 +1,8 @@
 # Where each harness reads its user-level configuration
 
 **Covers:** each harness's configuration paths, the files for one harness, the
-source and generated-file checks in `install`, and the facts behind these
-rules.
+source and generated-file checks in `install`, its Claude Code plugin step,
+and the facts behind these rules.
 **Read before** you change `install` or `tools/convert-agent.py`, add a harness,
 move a link, add a subagent key, or add a file to `user/<harness>/`.
 **Tasks:** `tasks/2026-10-24-per-harness-files/` (the files for one harness).
@@ -54,15 +54,16 @@ harness can have no such directory.
   example `user/claude/skills/statusline-legend/`. Its text says which
   harness it is for. OpenCode also reads `~/.claude/skills`, so it sees a skill
   for Claude Code too.
-- **`install` does not edit a harness's settings.** A harness writes its own
+- **`install` writes no harness's settings file.** A harness writes its own
   settings file, so `install` does not own it. When a file needs a settings
   entry to work, its doc gives the entry, and you add it by hand (for example,
-  [`statusline.md`](statusline.md)).
+  [`statusline.md`](statusline.md)). The one exception is a harness's own
+  command that changes its settings, as for the plugins below: then the
+  harness writes the file.
 - **A Claude Code plugin is not in `user/claude/`.** Claude Code loads a
   plugin only when it is installed, not from a file in `~/.claude/`, so a link
   does nothing for it. It goes in `plugins/`, and the repo is its plugin
-  source: you install it once, by hand, and Claude Code then reads it from
-  this checkout ([`status-band.md`](status-band.md#turn-it-on)).
+  source. See [Claude Code plugins](#claude-code-plugins).
 
 Use it only when the harnesses' interfaces differ too much for one shared file.
 A status line is the first case: Claude Code runs a command, Pi a TypeScript
@@ -165,9 +166,35 @@ for stale generated files and temporary files.
   `~/.claude/AGENTS.md` as a problem. Checked in the
   [memory docs](https://code.claude.com/docs/en/memory#agents-md), 2026-10-21.
 - **Cloud sessions** get nothing from your laptop's `~/.claude`. The cloud
-  environment's setup script runs `install --harness claude` before Claude Code
-  starts ([README](../README.md#claude-code-cloud-sessions)). Checked in the
+  environment's setup script runs `install --harness claude --no-plugins`
+  before Claude Code starts ([README](../README.md#claude-code-cloud-sessions)).
+  Checked in the
   [cloud environment docs](https://code.claude.com/docs/en/cloud-environments#what-carries-over-from-your-setup),
-  2026-10-21.
+  2026-10-21. A cloud session has no VS Code panel for the status band, so it
+  needs no plugins.
 - **`skills/synced/`** holds the skills of your claude.ai account. Claude Code
   writes it. Do not name a skill `synced`.
+
+## Claude Code plugins
+
+For the `claude` harness, `install` runs `tools/install-plugins.py`, which
+uses Claude Code's own commands. `--no-plugins` skips it.
+
+- **The marketplace.** If Claude Code has no marketplace with the name in
+  `.claude-plugin/marketplace.json`, it runs
+  `claude plugin marketplace add <this checkout>`. If one with that name is
+  there from another source or path, it reports it, changes nothing, and does
+  not check the plugins. So `install` run from a worktree reports the
+  marketplace of the main checkout.
+- **The plugins.** It runs `claude plugin install <plugin>@<marketplace>` for
+  each plugin in the marketplace that is not installed. It leaves an
+  installed plugin as it is, also a disabled one: to disable a plugin is the
+  user's choice.
+- **What it needs.** The `claude` command and `python3`. If either is
+  missing, `install` reports it and goes on with the rest.
+- **What it reads.** The output of `claude plugin marketplace list --json` and
+  `claude plugin list --json`, not their text for people. The helper prints
+  one line for each thing, `done ...` or `problem ...`, and `install` prints
+  or reports it.
+- **The tests** use a fake `claude` command, first on `PATH`, so that they
+  never run the real one (`tools/test-install`).

@@ -17,10 +17,12 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
   (`.claude-plugin/marketplace.json` lists them). `plugins/status-band/` draws
   the status line's gauges above the prompt in the VS Code panel
   ([`status-band.md`](docs/status-band.md))
-- `install`: links `user/` to where each harness reads it, and converts the
-  subagents
-- `tools/`: `convert-agent.py` (used by `install`), `test-install`, and `check`,
-  which runs every check before a commit
+- `install`: links `user/` to where each harness reads it, converts the
+  subagents, and installs the plugins
+- `tools/`: `convert-agent.py` and `install-plugins.py` (used by `install`),
+  `test-install`, `check`, which runs every check before a commit, and
+  `update-prices.ts` and `update-plugin-types`, which update a file that the
+  status band reads ([`status-band.md`](docs/status-band.md))
 - `docs/` ([`README.md`](docs/README.md)): where each harness reads what, and
   why; the status line and the VS Code status band
 - `tasks/`: one directory for each decision: its options, evidence and inputs
@@ -32,6 +34,7 @@ Pi. Project-specific rules stay in each project's own `AGENTS.md`.
 ```bash
 ./install                    # all four harnesses
 ./install --harness claude   # one harness; repeat the flag for more
+./install --no-plugins       # no Claude Code plugins
 ```
 
 `install` makes links that point into this checkout, so an edit here reaches
@@ -39,19 +42,18 @@ every harness at once. Run it again after you add or remove a skill, a subagent
 or a file in `user/<harness>/`. It is idempotent: when everything is already
 correct, it prints nothing and exits with status 0. It never removes or replaces
 anything that it did not write. The only files that it rewrites are the
-subagents that it generated, when their source changed. When something is not as
-expected (a link to somewhere else, a real file, a dangling link), it reports
-it, goes on with the rest, and exits with status 1. Look into each report, fix
-it, and run `install` again.
+subagents that it generated, when their source changed. For Claude Code, it also
+adds this checkout as a plugin marketplace and installs each plugin in it, with
+Claude Code's own `claude plugin` commands; that needs the `claude` command.
+`--no-plugins` skips this step. When something is not as expected (a link to
+somewhere else, a real file, a dangling link), it reports it, goes on with the
+rest, and exits with status 1. Look into each report, fix it, and run `install`
+again.
 
 ### A laptop
 
 `~/init-files/install-me` clones this repo to `~/Develop/agent-house/main` if it
 is not there, and then runs `install`.
-
-`install` does not install the plugins in `plugins/`. Install each one once, by
-hand, as its doc says: for the VS Code status band,
-[`status-band.md`](docs/status-band.md#turn-it-on).
 
 ### Claude Code cloud sessions
 
@@ -61,8 +63,11 @@ environment, at [claude.ai/code](https://claude.ai/code), put this in the
 
 ```bash
 git clone --depth 1 https://github.com/martincmartin/agent-house.git ~/agent-house
-~/agent-house/install --harness claude
+~/agent-house/install --harness claude --no-plugins
 ```
+
+The script passes `--no-plugins`: a cloud session has no VS Code panel for the
+status band to draw in.
 
 The setup script runs before Claude Code starts. The environment keeps the
 result for about seven days and reuses it, so a change here can take that long

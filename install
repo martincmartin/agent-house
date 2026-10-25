@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Link the user-level agent configuration in user/ to where each coding agent
-# reads it. See README.md and docs/harnesses.md.
+# reads it, and install the Claude Code plugins in plugins/. See README.md and
+# docs/harnesses.md.
 #
-# Usage: install [--harness claude|codex|opencode|pi]...
+# Usage: install [--harness claude|codex|opencode|pi]... [--no-plugins]
 #
-# With no --harness, it sets up all four. Keep it compatible with bash 3.2
-# (macOS /bin/bash).
+# With no --harness, it sets up all four. --no-plugins skips the plugins, for a
+# machine without the claude command or with no use for them. Keep it
+# compatible with bash 3.2 (macOS /bin/bash).
 
 set -euo pipefail
 shopt -s nullglob
@@ -26,7 +28,7 @@ problems=0
 checked_dirs=$'\n'
 
 usage() {
-    echo "usage: $0 [--harness ${ALL_HARNESSES// /|}]..." >&2
+    echo "usage: $0 [--harness ${ALL_HARNESSES// /|}]... [--no-plugins]" >&2
     exit 2
 }
 
@@ -314,8 +316,33 @@ install_harness() {
     fi
 }
 
+# Install the Claude Code plugins with Claude Code's own commands, through
+# tools/install-plugins.py, which says on each line what it did or found.
+install_plugins() {
+    local output line
+    if ! command -v claude >/dev/null; then
+        report "claude not found; it is needed to install the plugins (--no-plugins skips them)"
+        return 0
+    fi
+    if ! command -v python3 >/dev/null; then
+        report "python3 not found; it is needed to install the plugins"
+        return 0
+    fi
+    if ! output="$(python3 "$HOUSE/tools/install-plugins.py" "$HOUSE")"; then
+        report "tools/install-plugins.py failed"
+    fi
+    while IFS= read -r line; do
+        case "$line" in
+            "done "*) echo "${line#done }" ;;
+            "problem "*) report "${line#problem }" ;;
+            ?*) report "tools/install-plugins.py: unexpected output: $line" ;;
+        esac
+    done <<<"$output"
+}
+
 # Each name is checked to be one harness, so the list splits safely on spaces.
 harnesses=""
+plugins=yes
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --harness)
@@ -326,6 +353,10 @@ while [[ $# -gt 0 ]]; do
             fi
             harnesses="$harnesses $2"
             shift 2
+            ;;
+        --no-plugins)
+            plugins=""
+            shift
             ;;
         *) usage ;;
     esac
@@ -360,12 +391,20 @@ if check_source_dir "$USER_DIR/agents"; then
 fi
 
 shared_skills=""
+claude_plugins=""
 for harness in ${harnesses:-$ALL_HARNESSES}; do
     install_harness "$harness" "$instructions_source"
-    [[ "$harness" == claude ]] || shared_skills=yes
+    if [[ "$harness" == claude ]]; then
+        claude_plugins="$plugins"
+    else
+        shared_skills=yes
+    fi
 done
 if [[ -n "$shared_skills" ]]; then
     link_each "$SHARED_SKILLS_DIR" ${skills[@]+"${skills[@]}"}
+fi
+if [[ -n "$claude_plugins" ]]; then
+    install_plugins
 fi
 
 if [[ $problems -gt 0 ]]; then

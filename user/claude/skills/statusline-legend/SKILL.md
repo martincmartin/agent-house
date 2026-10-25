@@ -122,3 +122,8 @@ prompt box, with the same colours and pace rules. It differs in these ways:
 - **A rate limit** shows its percentage as Claude Code gives it, to one
   decimal (`23.5%`).
 - **It refreshes** each 10 seconds, and when Claude Code reports a change.
+- **The prices:** once a day, it reads Anthropic's pricing page. When
+  `prices.json` differs from it, a yellow line names each difference
+  (`claude-sonnet-5-5 cache_read 0.2 → 0.1`, `new claude-opus-6`,
+  `gone claude-opus-4`). agent-house's `tools/update-prices.ts` updates the
+  file. When it cannot read the page, a dim line says why.
