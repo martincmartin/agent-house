@@ -21,7 +21,14 @@ import {
 import { isDue, storedRead } from '../hooks/price-check.ts'
 import { diffParts, isCurrent, modelsJson, parsePrices, priceDiff, pricesJson } from '../hooks/prices.ts'
 import { parsePricingPage } from '../hooks/pricing-page.ts'
-import { addLines, cacheOf, newTranscriptState, OUTPUT_LIMIT, takeLines } from '../hooks/transcript.ts'
+import {
+  addLines,
+  cacheOf,
+  conversationAt,
+  newTranscriptState,
+  OUTPUT_LIMIT,
+  takeLines,
+} from '../hooks/transcript.ts'
 
 // 2026-10-25T14:00:00Z, in epoch seconds.
 const NOW = 1792936800
@@ -183,6 +190,15 @@ test('the cache goes cold a lifetime after the last response, which may only rea
     assistant('b', { cache_read_input_tokens: 10 }, 'claude-opus-5-5', '2026-10-25T14:10:00.000Z'),
   ], PRICES)
   expect(cacheOf(transcript)).toEqual({ expiresAt: NOW + 600 + 3600, ttl: 3600 })
+})
+
+test('a new session id, after a /clear, starts a new conversation with nothing read', () => {
+  const first = conversationAt(null, 'projects/p/a.jsonl')
+  first.transcripts.set('projects/p/a.jsonl', newTranscriptState())
+  expect(conversationAt(first, 'projects/p/a.jsonl')).toBe(first)
+  const cleared = conversationAt(first, 'projects/p/b.jsonl')
+  expect(cleared.main).toBe('projects/p/b.jsonl')
+  expect(cleared.transcripts.size).toBe(0)
 })
 
 test('autoCompactWindow is read for the model id without its suffix', () => {

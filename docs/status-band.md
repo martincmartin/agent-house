@@ -95,6 +95,10 @@ Found with Claude Code 2.1.310 on 2026-10-25, with a probe in VS Code
   with `tail -c`, and keeps only complete lines.
 - **`$.config.list()` does not give `autoCompactWindow`,** so the band reads
   `settings.json`.
+- **`/clear` and a resume fire no `session.start`.** The process goes on
+  under a new session id, and `$.session.id()` returns it. So each refresh
+  finds the conversation's transcript again from the session id, and starts
+  over when it changes.
 - **A mod gets no prompt-cache state.** The band takes the time of the main
   transcript's last response, and the lifetime of the cache entries that the
   last writer wrote. It does not get the misses (`prompt_cache.misses`), so it

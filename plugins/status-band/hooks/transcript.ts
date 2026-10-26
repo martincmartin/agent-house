@@ -84,6 +84,21 @@ export function addLines(
   }
 }
 
+// One conversation: its main transcript, and what was read so far from it and
+// from its subagents' transcripts, by path. A /clear or a resume starts a new
+// conversation in the same process, under a new session id, with no new
+// session.start.
+export interface Conversation {
+  readonly main: string
+  readonly transcripts: Map<string, TranscriptState>
+}
+
+// The conversation whose main transcript is at `main`: `last` if it is the
+// same one, else a new one with nothing read.
+export function conversationAt(last: Conversation | null, main: string): Conversation {
+  return last?.main === main ? last : { main, transcripts: new Map() }
+}
+
 // The cache that the transcript's last response refreshed; null until a
 // response wrote to it.
 export function cacheOf(transcript: TranscriptState): Cache | null {

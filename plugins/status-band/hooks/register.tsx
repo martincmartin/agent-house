@@ -5,8 +5,8 @@ import type { View } from '../types'
 import { ALERT, addCosts, compactWindowOf, costParts, gauges, NO_COSTS, svgBar, WARN } from './gauges.ts'
 import { pagePrices } from './price-check.ts'
 import { diffParts, isCurrent, parsePrices, priceDiff, PRICES_PATH } from './prices.ts'
-import { cacheOf, newTranscriptState, readTranscript, transcriptPaths } from './transcript.ts'
-import type { TranscriptState } from './transcript.ts'
+import { cacheOf, conversationAt, newTranscriptState, readTranscript, transcriptPaths } from './transcript.ts'
+import type { Conversation } from './transcript.ts'
 
 // The prompt cache, the context, the 5-hour and 7-day rate limits and the
 // session's cost, with bars, in the band above the prompt. VS Code only: the CLI has
@@ -28,13 +28,14 @@ const EMPTY_VIEW: View = {
 }
 const view = atom({ plugin: 'status-band', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
 
-// One session's side table, made new by each session.start. `refreshes`
-// runs one refresh at a time, so that two reads of a transcript do not
-// count its lines twice.
+// One session's side table, made new by each session.start. `projectDir`
+// holds the session's transcripts. Each refresh finds the conversation again
+// from the session id, which a /clear changes. `refreshes` runs one refresh
+// at a time, so that two reads of a transcript do not count its lines twice.
 interface Session {
-  readonly transcript: string
+  readonly projectDir: string
   readonly settings: string
-  readonly transcripts: Map<string, TranscriptState>
+  conversation: Conversation | null
   refreshes: Promise<void>
 }
 
@@ -50,15 +51,21 @@ async function refresh($: EngineInterface, session: Session): Promise<void> {
   try {
     const usage = await $.session.usage()
     const prices = parsePrices(await $.fs.read(`${$.plugin.root}/${PRICES_PATH}`))
-    for (const path of await transcriptPaths($, session.transcript)) {
-      const before = session.transcripts.get(path) ?? newTranscriptState()
-      session.transcripts.set(path, await readTranscript($, path, before, prices))
+    const conversation = conversationAt(
+      session.conversation,
+      `${session.projectDir}/${await $.session.id()}.jsonl`,
+    )
+    session.conversation = conversation
+    const { transcripts } = conversation
+    for (const path of await transcriptPaths($, conversation.main)) {
+      const before = transcripts.get(path) ?? newTranscriptState()
+      transcripts.set(path, await readTranscript($, path, before, prices))
     }
-    const costs = [...session.transcripts.values()].reduce(
+    const costs = [...transcripts.values()].reduce(
       (sum, transcript) => addCosts(sum, transcript.costs),
       NO_COSTS,
     )
-    const main = session.transcripts.get(session.transcript)
+    const main = transcripts.get(conversation.main)
     const model = main?.lastModel ?? null
     const compactWindow =
       model === null ? null : compactWindowOf(await readSettings($, session.settings), model)
@@ -92,9 +99,9 @@ export const register: Register = on => {
     // character that is not a letter or a digit as "-".
     const project = (await $.session.cwd()).replace(/[^A-Za-z0-9]/g, '-')
     const started: Session = {
-      transcript: `${config}/projects/${project}/${await $.session.id()}.jsonl`,
+      projectDir: `${config}/projects/${project}`,
       settings: `${config}/settings.json`,
-      transcripts: new Map(),
+      conversation: null,
       refreshes: Promise.resolve(),
     }
     session = started
