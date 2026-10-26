@@ -21,7 +21,10 @@ project's own docs can add house rules on top of these.
 
 - Write tests, checks and scripts in TypeScript, unless another language fits
   the job clearly better (SciPy for optimisation, R for statistics). It can
-  import the deck's own code, and it shares the deck's toolchain.
+  import the deck's own code, and it shares the deck's toolchain, so the
+  project needs no second runtime. Playwright is native to Node, and code that
+  runs in the page (`page.evaluate`) is in the same language, checked by the
+  same `tsc`.
 - Do not rewrite a working script only to follow this rule.
 
 ## Traps that fail silently
